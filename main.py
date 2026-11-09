@@ -16,7 +16,7 @@ import json
 import re
 
 
-SECRET_KEY = "chave_super_secreta_prefeitura_2026"
+SECRET_KEY = os.getenv("SECRET_KEY", "chave_demonstracao_portfolio_2026")
 ALGORITHM = "HS256"
 
 
@@ -253,7 +253,7 @@ def get_db():
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
-SENHA_EDICAO = "123456"
+
 
 def obter_usuario_logado(request: Request, db: Session = Depends(get_db)):
     token = request.cookies.get("auth_token")
