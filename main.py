@@ -208,8 +208,39 @@ except Exception as e:
 db_setup = SessionLocal()
 if not db_setup.query(Usuario).first():
     senha_codificada = bcrypt.hashpw("123456".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-    admin = Usuario(username="00000000000", senha_hash=senha_codificada, nome_completo="Administrador Geral")
+    admin = Usuario(username="00000000000", senha_hash=senha_codificada, nome_completo="Visitante (Portfólio)")
     db_setup.add(admin)
+    db_setup.commit()
+
+# Popula dados fictícios caso o banco esteja vazio (Ideal para Portfólio)
+if not db_setup.query(Registro).first():
+    exemplos = [
+        Registro(
+            numero_documento=101, tipo="Intimação", inciso="i iii", nome="JOÃO DA SILVA (DADO FICTÍCIO)",
+            cpf="111.222.333-44", data="15/10/2026", status_documento="Conferido - Atendido",
+            status_limpeza="Atendido", status_fechamento="Atendido",
+            data_vistoria_limpeza="2026-10-25", data_vistoria_fechamento="2026-10-25",
+            imoveis=json.dumps({"endereco_completo": "RUA DAS FLORES, S/N", "bairro": "CENTRO", "quadra": "10", "lotes": [{"inscricao": "01.02.003.0004.001", "numero": "12"}]}),
+            criado_por="Sistema Demo"
+        ),
+        Registro(
+            numero_documento=102, tipo="Intimação", inciso="i", nome="CONSTRUTORA EXEMPLO LTDA",
+            cpf="12.345.678/0001-99", data="18/10/2026", status_documento="Auto 50/26",
+            status_limpeza="Não Atendido", data_vistoria_limpeza="2026-10-28",
+            imoveis=json.dumps({"endereco_completo": "AV. BRASIL", "bairro": "JARDIM PANORAMA", "quadra": "04", "lotes": [{"inscricao": "02.03.004.0005.001", "numero": "01"}, {"inscricao": "02.03.004.0006.001", "numero": "02"}]}),
+            criado_por="Sistema Demo"
+        ),
+        Registro(
+            numero_documento=50, tipo="Auto", inciso="i", nome="CONSTRUTORA EXEMPLO LTDA",
+            cpf="12.345.678/0001-99", data="02/11/2026", numero_intimacao_fiscal="102/26",
+            dia_intimacao="18", mes_intimacao="OUTUBRO", ano_intimacao="2026",
+            status_documento="MULTADO", status_limpeza="Não Atendido", data_vistoria_limpeza="2026-11-08",
+            mes_multa="Novembro", ano_multa="2026", multa_limpeza=True,
+            imoveis=json.dumps({"endereco_completo": "AV. BRASIL", "bairro": "JARDIM PANORAMA", "quadra": "04", "lotes": [{"inscricao": "02.03.004.0005.001", "numero": "01"}, {"inscricao": "02.03.004.0006.001", "numero": "02"}]}),
+            criado_por="Sistema Demo"
+        )
+    ]
+    db_setup.add_all(exemplos)
     db_setup.commit()
 db_setup.close()
     
