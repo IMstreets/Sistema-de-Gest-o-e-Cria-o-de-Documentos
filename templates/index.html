@@ -1,0 +1,1676 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestão de Autos e Intimações</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/htmx.org@1.9.4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- NOVO PLUGIN PARA MOSTRAR OS NÚMEROS NOS GRÁFICOS -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+    <style>
+        body { background-color: #fdf6e3; color: #212529; overflow: hidden; }
+        .sidebar { width: 280px; height: 100vh; background-color: #ffffff; border-right: 1px solid #dee2e6; }
+        .nav-pills .nav-link { color: #495057; border-radius: 0.25rem; margin-bottom: 0.5rem; }
+        .nav-pills .nav-link:hover { background-color: #e9ecef; color: #212529; }
+        .nav-pills .nav-link.active { background-color: #1b37b0; color: #fff; }
+        .main-content { height: 100vh; overflow-y: auto; background-color: #fdf6e3; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #fdf6e3; }
+        ::-webkit-scrollbar-thumb { background: #adb5bd; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6c757d; }
+        .card-formulario { background-color: #1b37b0; border: 1px solid #11257a; }
+        .card-tabela { background-color: #ffffff; border: 1px solid #dee2e6; }
+    </style>
+</head>
+<body>
+    <div class="d-flex">
+        <!-- MENU LATERAL (SIDEBAR) -->
+        <div class="sidebar d-flex flex-column p-3 shadow-sm">
+            <h5 class="text-dark mb-4 border-bottom pb-3 mt-2 text-center fw-bold">Gestão Municipal - Lotes Vagos</h5>
+            <ul class="nav nav-pills flex-column mb-auto" id="menu-tabs" role="tablist">
+                <li class="nav-item">
+                    <button class="nav-link active w-100 text-start fw-bold" id="tab-dashboard" data-bs-toggle="pill" data-bs-target="#conteudo-dashboard" type="button" role="tab">📊 Visão Geral</button>
+                </li>
+                <li class="nav-item">
+                    <button class="nav-link w-100 text-start fw-bold" id="tab-formulario" data-bs-toggle="pill" data-bs-target="#conteudo-formulario" type="button" role="tab">📄 Novo Documento</button>
+                </li>
+                <li class="nav-item">
+                    <button class="nav-link w-100 text-start fw-bold" id="tab-autos" data-bs-toggle="pill" data-bs-target="#conteudo-autos" type="button" role="tab">🗃️ Autos de Infração</button>
+                </li>
+                <li class="nav-item">
+                    <button class="nav-link w-100 text-start fw-bold" id="tab-intimacoes" data-bs-toggle="pill" data-bs-target="#conteudo-intimacoes" type="button" role="tab">🗃️ Intimações Fiscais</button>
+                </li>
+            </ul>
+            <hr>
+            <div class="d-flex flex-column gap-2">
+                {% if not auth %}
+                    <form onsubmit="event.preventDefault(); fazerLogin();" class="d-flex flex-column gap-2 m-0">
+                        <small class="text-danger text-center fw-bold">Modo Leitura</small>
+                        <input type="text" id="login-user" class="form-control form-control-sm mb-1" placeholder="CPF" oninput="mascaraCPFCNPJ(this)" maxlength="14">
+                        <input type="password" id="login-pass" class="form-control form-control-sm mb-1" placeholder="Senha">
+                        <button type="submit" class="btn btn-sm btn-primary w-100">Fazer Login</button>
+                    </form>
+                {% else %}
+                    <small class="text-success text-center fw-bold">Olá, {{ auth.nome_completo }}</small>
+                    <button class="btn btn-sm btn-outline-danger w-100" onclick="sairAuth()">Sair (Logout)</button>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- CONTEÚDO PRINCIPAL -->
+        <div class="main-content flex-grow-1 p-5">
+           <!-- Painel de Busca e Filtros -->
+            <form method="get" action="/" class="card p-3 mb-4 shadow-sm border-0 bg-white rounded">
+                
+                <!-- Primeira Linha: Buscas e Filtros Principais -->
+                <div class="row g-2 align-items-end mb-3">
+                    <div class="col-md-3">
+                        <label class="form-label fw-bold text-muted small mb-1">Nº Doc ou Nome</label>
+                        <input type="text" name="busca" class="form-control" placeholder="Ex: 123 ou João..." value="{{ busca }}">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-bold text-muted small mb-1">Rua / Bairro do Lote</label>
+                        <input type="text" name="busca_endereco" class="form-control" placeholder="Ex: Rua A, Centro..." value="{{ busca_endereco }}">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-bold text-muted small mb-1">Infração Específica</label>
+                        <select name="filtro_inciso" class="form-select" onchange="this.form.submit()">
+                            <option value="">Todas as Infrações</option>
+                            <optgroup label="Contém a Infração (Isolada ou Combinada)">
+                                <option value="contem_i" {% if filtro_inciso == 'contem_i' %}selected{% endif %}>🔍 Qualquer c/ Limpeza</option>
+                                <option value="contem_iii" {% if filtro_inciso == 'contem_iii' %}selected{% endif %}>🔍 Qualquer c/ Fechamento</option>
+                                <option value="contem_iv" {% if filtro_inciso == 'contem_iv' %}selected{% endif %}>🔍 Qualquer c/ Passeio</option>
+                            </optgroup>
+                            <optgroup label="Combinação Exata do Documento">
+                                <option value="i" {% if filtro_inciso == 'i' %}selected{% endif %}>Apenas Limpeza</option>
+                                <option value="iii" {% if filtro_inciso == 'iii' %}selected{% endif %}>Apenas Fechamento</option>
+                                <option value="iv" {% if filtro_inciso == 'iv' %}selected{% endif %}>Apenas Passeio</option>
+                                <option value="i iii" {% if filtro_inciso == 'i iii' %}selected{% endif %}>Limpeza e Fechamento</option>
+                                <option value="i iv" {% if filtro_inciso == 'i iv' %}selected{% endif %}>Limpeza e Passeio</option>
+                                <option value="iii iv" {% if filtro_inciso == 'iii iv' %}selected{% endif %}>Fechamento e Passeio</option>
+                                <option value="i iii iv" {% if filtro_inciso == 'i iii iv' %}selected{% endif %}>Limpeza, Fechamento e Passeio</option>
+                            </optgroup>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-bold text-muted small mb-1">Status da Vistoria</label>
+                        <select name="filtro_status" class="form-select" onchange="this.form.submit()">
+                            <option value="">Todos os Status</option>
+                            <optgroup label="Por Infração Individual (Auditoria)">
+                                <option value="L_ATENDIDO" {% if filtro_status == 'L_ATENDIDO' %}selected{% endif %}>✅ Limpeza: Atendida</option>
+                                <option value="L_NAO_ATENDIDO" {% if filtro_status == 'L_NAO_ATENDIDO' %}selected{% endif %}>❌ Limpeza: Não Atendida</option>
+                                <option value="L_PENDENTE" {% if filtro_status == 'L_PENDENTE' %}selected{% endif %}>⏳ Limpeza: Pendente</option>
+                                <option value="F_ATENDIDO" {% if filtro_status == 'F_ATENDIDO' %}selected{% endif %}>✅ Fechamento: Atendido</option>
+                                <option value="F_NAO_ATENDIDO" {% if filtro_status == 'F_NAO_ATENDIDO' %}selected{% endif %}>❌ Fechamento: Não Atendido</option>
+                                <option value="F_PENDENTE" {% if filtro_status == 'F_PENDENTE' %}selected{% endif %}>⏳ Fechamento: Pendente</option>
+                                <option value="P_ATENDIDO" {% if filtro_status == 'P_ATENDIDO' %}selected{% endif %}>✅ Passeio: Atendido</option>
+                                <option value="P_NAO_ATENDIDO" {% if filtro_status == 'P_NAO_ATENDIDO' %}selected{% endif %}>❌ Passeio: Não Atendido</option>
+                                <option value="P_PENDENTE" {% if filtro_status == 'P_PENDENTE' %}selected{% endif %}>⏳ Passeio: Pendente</option>
+                            </optgroup>
+                            <optgroup label="Por Status Geral do Documento">
+                                <option value="Aguardando AR" {% if filtro_status == 'Aguardando AR' %}selected{% endif %}>Aguardando AR</option>
+                                <option value="Conferir" {% if filtro_status == 'Conferir' %}selected{% endif %}>Conferir Prazo (Geral)</option>
+                                <option value="Conferido - Atendido" {% if filtro_status == 'Conferido - Atendido' %}selected{% endif %}>100% Atendidos (Geral)</option>
+                                <option value="Conferido - Não Atendido" {% if filtro_status == 'Conferido - Não Atendido' %}selected{% endif %}>Não Atendidos (Geral + Autos)</option>
+                                <option value="Virou Auto" {% if filtro_status == 'Virou Auto' %}selected{% endif %}>Intimações que viraram Auto</option>
+                                <option value="Multados" {% if filtro_status == 'Multados' %}selected{% endif %}>Multados</option>
+                                <option value="Devolvido/Refeito" {% if filtro_status == 'Devolvido/Refeito' %}selected{% endif %}>Devolvido (Refeito)</option>
+                                <option value="Devolvido/Não Refeito" {% if filtro_status == 'Devolvido/Não Refeito' %}selected{% endif %}>Devolvido (Não Refeito)</option>
+                                <option value="Cancelado/Refeito" {% if filtro_status == 'Cancelado/Refeito' %}selected{% endif %}>Cancelado (Refeito)</option>
+                                <option value="Cancelado/Não Refeito" {% if filtro_status == 'Cancelado/Não Refeito' %}selected{% endif %}>Cancelado (Não Refeito)</option>
+                            </optgroup>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Segunda Linha: Datas (Emissão e Vistoria) e Botões de Ação -->
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-2">
+                        <label class="form-label fw-bold text-primary small mb-1"><i class="bi bi-calendar-check"></i> Ano de Exercício</label>
+                        <select name="ano_base" class="form-select border-primary fw-bold text-primary shadow-sm" onchange="this.form.submit()">
+                            <option value="2025" {% if ano_base == '2025' %}selected{% endif %}>2025</option>
+                            <option value="2026" {% if ano_base == '2026' %}selected{% endif %}>2026</option>
+                            <option value="2027" {% if ano_base == '2027' %}selected{% endif %}>2027</option>
+                            <option value="2028" {% if ano_base == '2028' %}selected{% endif %}>2028</option>
+                            <option value="2029" {% if ano_base == '2029' %}selected{% endif %}>2029</option>
+                            <option value="2030" {% if ano_base == '2030' %}selected{% endif %}>2030</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label fw-bold text-muted small mb-1">Emissão (Início)</label>
+                        <input type="date" name="data_inicio" class="form-control" value="{{ data_inicio }}">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label fw-bold text-muted small mb-1">Emissão (Fim)</label>
+                        <input type="date" name="data_fim" class="form-control" value="{{ data_fim }}">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label fw-bold text-info-emphasis small mb-1">Vistoria (Início)</label>
+                        <input type="date" name="vistoria_inicio" class="form-control border-info" value="{{ vistoria_inicio }}">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label fw-bold text-info-emphasis small mb-1">Vistoria (Fim)</label>
+                        <input type="date" name="vistoria_fim" class="form-control border-info" value="{{ vistoria_fim }}">
+                    </div>
+                    <div class="col-md-2 d-flex gap-2">
+                        <button type="submit" class="btn btn-primary fw-bold w-50 shadow-sm">Filtrar</button>
+                        <a href="/" class="btn btn-secondary fw-bold w-50 shadow-sm">Limpar</a>
+                    </div>
+                </div>
+            </form>
+
+            <div class="tab-content">
+                <!-- ABA 0: Dashboard (Ativa por padrão) -->
+                <div class="tab-pane fade show active" id="conteudo-dashboard" role="tabpanel">
+                    <h4 class="text-dark mb-4 fw-bold">Análise de Dados (Por Lotes)</h4>
+                    
+                    <!-- Cartões de Resumo Rápido -->
+                    <div class="row mb-4">
+                        <div class="col-md-4">
+                            <div class="card bg-primary text-white shadow-sm border-0">
+                                <div class="card-body">
+                                    <h6 class="fw-bold text-uppercase mb-1"><small>Total de Lotes Notificados</small></h6>
+                                    <h2 class="mb-0 fw-bold">{{ total_lotes }}</h2>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card bg-warning text-dark shadow-sm border-0">
+                                <div class="card-body">
+                                    <h6 class="fw-bold text-uppercase mb-1"><small>Lotes Intimados</small></h6>
+                                    <h2 class="mb-0 fw-bold">{{ total_lotes_ints }}</h2>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card bg-danger text-white shadow-sm border-0">
+                                <div class="card-body">
+                                    <h6 class="fw-bold text-uppercase mb-1"><small>Lotes Autuados</small></h6>
+                                    <h2 class="mb-0 fw-bold">{{ total_lotes_autos }}</h2>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- LINHA 1: Volume Temporal e Eficiência -->
+                    <div class="row mb-4">
+                        <!-- Gráfico 1: Documentos Físicos -->
+                        <div class="col-md-4">
+                            <div class="card shadow-sm border-0 p-4 h-100 d-flex flex-column">
+                                <h6 class="fw-bold text-dark mb-3">Emissões por Mês (Documentos)</h6>
+                                <div style="height: 260px;" class="flex-grow-1"><canvas id="chartMesesDocs"></canvas></div>
+                                <div class="d-flex justify-content-around border-top pt-2 mt-2 small fw-bold">
+                                    <span class="text-warning-emphasis">Intimações: {{ intimacoes|length }}</span>
+                                    <span class="text-danger">Autos: {{ autos|length }}</span>
+                                    <span class="text-dark">Total: {{ (intimacoes|length) + (autos|length) }}</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Gráfico 2: Lotes Atingidos -->
+                        <div class="col-md-4">
+                            <div class="card shadow-sm border-0 p-4 h-100 d-flex flex-column">
+                                <h6 class="fw-bold text-dark mb-3">Quantidade de Lotes Notificados por Mês</h6>
+                                <div style="height: 260px;" class="flex-grow-1"><canvas id="chartMesesLotes"></canvas></div>
+                                <div class="d-flex justify-content-around border-top pt-2 mt-2 small fw-bold">
+                                    <span class="text-warning-emphasis">Intimações: {{ total_lotes_ints }}</span>
+                                    <span class="text-danger">Autos: {{ total_lotes_autos }}</span>
+                                    <span class="text-dark">Total: {{ total_lotes }}</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Gráfico 3: Status de Atendimento -->
+                        <div class="col-md-4">
+                            <div class="card shadow-sm border-0 p-4 h-100 position-relative">
+                                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                                    <h6 class="fw-bold text-dark mb-0">Status de Atendimento</h6>
+                                    <div class="d-flex flex-wrap gap-1">
+                                        <select id="filtroMetricaStatus" class="form-select form-select-sm w-auto shadow-sm border-0 bg-light fw-bold text-primary">
+                                            <option value="lotes">Quantidade de Lotes</option>
+                                            <option value="docs">Documentos Emitidos</option>
+                                        </select>
+                                        <select id="filtroTipoStatus" class="form-select form-select-sm w-auto shadow-sm border-0 bg-light fw-bold text-secondary">
+                                            <option value="Todos">Todos</option>
+                                            <option value="Autos">Autos</option>
+                                            <option value="Intimações">Intimações</option>
+                                        </select>
+                                        <select id="filtroMesStatus" class="form-select form-select-sm w-auto shadow-sm border-0 bg-light fw-bold text-secondary">
+                                            <option value="Todos">Todos</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div style="height: 280px;"><canvas id="chartStatus"></canvas></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- LINHA 2: Análise de Infrações -->
+                    <div class="row mb-4">
+                        <!-- Gráfico 4: Demandas Isoladas -->
+                        <div class="col-md-4">
+                            <div class="card shadow-sm border-0 p-4 h-100 position-relative">
+                                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                                    <h6 class="fw-bold text-dark mb-0">Demandas Isoladas</h6>
+                                    <div class="d-flex flex-wrap gap-1">
+                                        <select id="filtroMetricaIsoladas" class="form-select form-select-sm w-auto shadow-sm border-0 bg-light fw-bold text-primary">
+                                            <option value="lotes">Quantidade de Lotes</option>
+                                            <option value="docs">Documentos Emitidos</option>
+                                        </select>
+                                        <select id="filtroTipoIsoladas" class="form-select form-select-sm w-auto shadow-sm border-0 bg-light fw-bold text-secondary">
+                                            <option value="Todos">Todos</option>
+                                            <option value="Autos">Autos</option>
+                                            <option value="Intimações">Intimações</option>
+                                        </select>
+                                        <select id="filtroMesIsoladas" class="form-select form-select-sm w-auto shadow-sm border-0 bg-light fw-bold text-secondary">
+                                            <option value="Todos">Todos</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div style="height: 250px;"><canvas id="chartIsoladas"></canvas></div>
+                            </div>
+                        </div>
+
+                        <!-- Gráfico 5: Pizza Autos -->
+                        <div class="col-md-4">
+                            <div class="card shadow-sm border-0 p-4 h-100">
+                                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                                    <h6 class="fw-bold text-dark mb-0">Autos: Composição de Infração</h6>
+                                    <select id="filtroMetricaPizzaAutos" class="form-select form-select-sm w-auto shadow-sm border-0 bg-light fw-bold text-primary">
+                                        <option value="lotes">Quantidade de Lotes</option>
+                                        <option value="docs">Documentos Emitidos</option>
+                                    </select>
+                                </div>
+                                <div style="height: 250px;"><canvas id="chartPizzaAutos"></canvas></div>
+                            </div>
+                        </div>
+
+                        <!-- Gráfico 6: Pizza Intimações -->
+                        <div class="col-md-4">
+                            <div class="card shadow-sm border-0 p-4 h-100">
+                                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                                    <h6 class="fw-bold text-dark mb-0">Intimações: Composição de Infração</h6>
+                                    <select id="filtroMetricaPizzaInts" class="form-select form-select-sm w-auto shadow-sm border-0 bg-light fw-bold text-primary">
+                                        <option value="lotes">Quantidade de Lotes</option>
+                                        <option value="docs">Documentos Emitidos</option>
+                                    </select>
+                                </div>
+                                <div style="height: 250px;"><canvas id="chartPizzaInts"></canvas></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <script>
+                    document.addEventListener("DOMContentLoaded", function() {
+                        const dados = {{ dados_graficos_json | safe }};
+                        const paletaCores = ['#0d6efd', '#dc3545', '#198754', '#ffc107', '#0dcaf0', '#6610f2', '#6c757d', '#d63384'];
+                        
+                        Chart.register(ChartDataLabels);
+
+                        const configRotulosBarras = {
+                            anchor: 'end',
+                            align: 'top',
+                            color: '#212529',
+                            font: { weight: 'bold', size: 12 },
+                            formatter: (value) => value > 0 ? value : ''
+                        };
+
+                        // 1. Gráfico: Histórico de Meses (Documentos Físicos)
+                        if(document.getElementById('chartMesesDocs')) {
+                            new Chart(document.getElementById('chartMesesDocs').getContext('2d'), {
+                                type: 'bar',
+                                data: {
+                                    labels: dados.meses || [],
+                                    datasets: [
+                                        { label: 'Intimações', data: dados.ints_por_mes_docs || [], backgroundColor: '#ffc107', borderRadius: 4 },
+                                        { label: 'Autos', data: dados.autos_por_mes_docs || [], backgroundColor: '#dc3545', borderRadius: 4 }
+                                    ]
+                                },
+                                options: { 
+                                    responsive: true, maintainAspectRatio: false, 
+                                    plugins: { datalabels: configRotulosBarras, legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 10 } } } },
+                                    scales: { y: { beginAtZero: true, ticks: { stepSize: 1 }, grace: '15%' } } 
+                                }
+                            });
+                        }
+
+                        // 2. Gráfico: Histórico de Meses (Lotes Atingidos)
+                        if(document.getElementById('chartMesesLotes')) {
+                            new Chart(document.getElementById('chartMesesLotes').getContext('2d'), {
+                                type: 'bar',
+                                data: {
+                                    labels: dados.meses || [],
+                                    datasets: [
+                                        { label: 'Intimações', data: dados.ints_por_mes_lotes || [], backgroundColor: '#ffc107', borderRadius: 4 },
+                                        { label: 'Autos', data: dados.autos_por_mes_lotes || [], backgroundColor: '#dc3545', borderRadius: 4 }
+                                    ]
+                                },
+                                options: { 
+                                    responsive: true, maintainAspectRatio: false, 
+                                    plugins: { datalabels: configRotulosBarras, legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 10 } } } },
+                                    scales: { y: { beginAtZero: true, ticks: { stepSize: 1 }, grace: '15%' } } 
+                                }
+                            });
+                        }
+
+                        // 3. Gráfico: Status de Atendimento (Com Triplo Filtro: Métrica, Tipo e Mês)
+                        if(document.getElementById('chartStatus')) {
+                            let baseInicial = (dados.status_det_geral && dados.status_det_geral.lotes && dados.status_det_geral.lotes["Todos"]) 
+                                ? dados.status_det_geral.lotes["Todos"] 
+                                : {nl:0, al:0, nf:0, af:0, np:0, ap:0};
+                            
+                            let chartStatus = new Chart(document.getElementById('chartStatus').getContext('2d'), {
+                                type: 'bar',
+                                data: {
+                                    labels: ["Limpeza", "Fechamento", "Passeio"], 
+                                    datasets: [
+                                        { 
+                                            label: 'ATENDIDO', 
+                                            data: [baseInicial.al, baseInicial.af, baseInicial.ap], 
+                                            backgroundColor: '#198754', 
+                                            borderRadius: 4 
+                                        },
+                                        { 
+                                            label: 'NÃO ATENDIDO', 
+                                            data: [baseInicial.nl, baseInicial.nf, baseInicial.np], 
+                                            backgroundColor: '#dc3545', 
+                                            borderRadius: 4 
+                                        }
+                                    ]
+                                },
+                                options: { 
+                                    responsive: true, maintainAspectRatio: false, 
+                                    plugins: { 
+                                        datalabels: configRotulosBarras,
+                                        legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 }, padding: 10 } }
+                                    },
+                                    scales: { y: { beginAtZero: true, ticks: { stepSize: 1 }, grace: '15%' } } 
+                                }
+                            });
+
+                            const selectMetrica = document.getElementById('filtroMetricaStatus');
+                            const selectMes = document.getElementById('filtroMesStatus');
+                            const selectTipo = document.getElementById('filtroTipoStatus');
+                            
+                            selectMes.innerHTML = '<option value="Todos">Todos</option>';
+                            if (dados.status_det_mensal) {
+                                Object.keys(dados.status_det_mensal).forEach(mes => {
+                                    let opt = document.createElement('option');
+                                    opt.value = mes;
+                                    opt.textContent = mes;
+                                    selectMes.appendChild(opt);
+                                });
+                            }
+
+                            function atualizarGraficoStatus() {
+                                let metrica = selectMetrica.value;
+                                let mes = selectMes.value;
+                                let tipo = selectTipo.value;
+
+                                let geralMetrica = (dados.status_det_geral && dados.status_det_geral[metrica]) ? dados.status_det_geral[metrica] : {};
+                                let mensalMetrica = (dados.status_det_mensal && dados.status_det_mensal[mes] && dados.status_det_mensal[mes][metrica]) 
+                                    ? dados.status_det_mensal[mes][metrica] 
+                                    : {};
+
+                                let grupoBase = (mes === 'Todos') ? geralMetrica : mensalMetrica;
+                                let dataset = grupoBase[tipo] || {nl:0, al:0, nf:0, af:0, np:0, ap:0};
+                                
+                                chartStatus.data.datasets[0].data = [dataset.al, dataset.af, dataset.ap];
+                                chartStatus.data.datasets[1].data = [dataset.nl, dataset.nf, dataset.np];
+                                chartStatus.update();
+                            }
+
+                            selectMetrica.addEventListener('change', atualizarGraficoStatus);
+                            selectMes.addEventListener('change', atualizarGraficoStatus);
+                            selectTipo.addEventListener('change', atualizarGraficoStatus);
+                        }
+
+                        // 4. Gráfico: Demandas Isoladas (Com Triplo Filtro: Métrica, Tipo e Mês)
+                        if(document.getElementById('chartIsoladas')) {
+                            let isoInicial = (dados.isoladas_geral && dados.isoladas_geral.lotes && dados.isoladas_geral.lotes["Todos"]) 
+                                ? dados.isoladas_geral.lotes["Todos"] 
+                                : {l:0, f:0, p:0};
+
+                            let chartIsoladas = new Chart(document.getElementById('chartIsoladas').getContext('2d'), {
+                                type: 'bar',
+                                data: {
+                                    labels: ["Limpeza", "Fechamento", "Passeio"],
+                                    datasets: [{
+                                        data: [isoInicial.l, isoInicial.f, isoInicial.p],
+                                        backgroundColor: ['#0dcaf0', '#198754', '#6c757d'],
+                                        borderRadius: 4
+                                    }]
+                                },
+                                options: { 
+                                    responsive: true, maintainAspectRatio: false, 
+                                    plugins: { legend: { display: false }, datalabels: configRotulosBarras }, 
+                                    scales: { y: { beginAtZero: true, ticks: { stepSize: 1 }, grace: '15%' } } 
+                                }
+                            });
+
+                            const selectMetricaIso = document.getElementById('filtroMetricaIsoladas');
+                            const selectMesIso = document.getElementById('filtroMesIsoladas');
+                            const selectTipoIso = document.getElementById('filtroTipoIsoladas');
+
+                            selectMesIso.innerHTML = '<option value="Todos">Todos</option>';
+                            if (dados.isoladas_mensal) {
+                                Object.keys(dados.isoladas_mensal).forEach(mes => {
+                                    let opt = document.createElement('option');
+                                    opt.value = mes;
+                                    opt.textContent = mes;
+                                    selectMesIso.appendChild(opt);
+                                });
+                            }
+
+                            function atualizarGraficoIsoladas() {
+                                let metrica = selectMetricaIso.value;
+                                let mes = selectMesIso.value;
+                                let tipo = selectTipoIso.value;
+
+                                let geralMetrica = (dados.isoladas_geral && dados.isoladas_geral[metrica]) ? dados.isoladas_geral[metrica] : {};
+                                let mensalMetrica = (dados.isoladas_mensal && dados.isoladas_mensal[mes] && dados.isoladas_mensal[mes][metrica]) 
+                                    ? dados.isoladas_mensal[mes][metrica] 
+                                    : {};
+
+                                let grupoBase = (mes === 'Todos') ? geralMetrica : mensalMetrica;
+                                let dataset = grupoBase[tipo] || {l:0, f:0, p:0};
+
+                                chartIsoladas.data.datasets[0].data = [dataset.l, dataset.f, dataset.p];
+                                chartIsoladas.update();
+                            }
+
+                            selectMetricaIso.addEventListener('change', atualizarGraficoIsoladas);
+                            selectMesIso.addEventListener('change', atualizarGraficoIsoladas);
+                            selectTipoIso.addEventListener('change', atualizarGraficoIsoladas);
+                        }
+
+                        // 5. Configuração e Renderização dos Gráficos de Pizza (Com Filtro de Métrica)
+                        const configDoughnut = (labels, values) => ({
+                            type: 'doughnut',
+                            data: {
+                                labels: labels || [],
+                                datasets: [{ data: values || [], backgroundColor: paletaCores, borderWidth: 1 }]
+                            },
+                            options: { 
+                                responsive: true, maintainAspectRatio: false, 
+                                plugins: { 
+                                    legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 10 } } },
+                                    datalabels: {
+                                        color: '#ffffff',
+                                        font: { weight: 'bold', size: 14 },
+                                        formatter: (value) => value > 0 ? value : ''
+                                    }
+                                } 
+                            }
+                        });
+
+                        if(document.getElementById('chartPizzaAutos')) {
+                            let paInicial = (dados.pizza_autos && dados.pizza_autos.lotes) ? dados.pizza_autos.lotes : {labels: [], valores: []};
+                            let chartPA = new Chart(document.getElementById('chartPizzaAutos').getContext('2d'), configDoughnut(paInicial.labels, paInicial.valores));
+                            
+                            const selPA = document.getElementById('filtroMetricaPizzaAutos');
+                            selPA.addEventListener('change', function() {
+                                let d = (dados.pizza_autos && dados.pizza_autos[selPA.value]) ? dados.pizza_autos[selPA.value] : {labels: [], valores: []};
+                                chartPA.data.labels = d.labels;
+                                chartPA.data.datasets[0].data = d.valores;
+                                chartPA.update();
+                            });
+                        }
+
+                        if(document.getElementById('chartPizzaInts')) {
+                            let piInicial = (dados.pizza_ints && dados.pizza_ints.lotes) ? dados.pizza_ints.lotes : {labels: [], valores: []};
+                            let chartPI = new Chart(document.getElementById('chartPizzaInts').getContext('2d'), configDoughnut(piInicial.labels, piInicial.valores));
+                            
+                            const selPI = document.getElementById('filtroMetricaPizzaInts');
+                            selPI.addEventListener('change', function() {
+                                let d = (dados.pizza_ints && dados.pizza_ints[selPI.value]) ? dados.pizza_ints[selPI.value] : {labels: [], valores: []};
+                                chartPI.data.labels = d.labels;
+                                chartPI.data.datasets[0].data = d.valores;
+                                chartPI.update();
+                            });
+                        }
+                    });
+                </script>
+                
+                
+                <!-- ABA 1: Formulário -->
+                <div class="tab-pane fade" id="conteudo-formulario" role="tabpanel">
+                    <h4 class="text-dark mb-4 fw-bold">Preenchimento de Registro</h4>
+                    <div id="container-formulario" class="card card-formulario p-4 shadow-sm">
+                        {% include 'formulario.html' %}
+                    </div>
+                </div>
+
+                <!-- MACRO PARA GERAR TABELAS -->
+                {% macro render_tabela(lista, qtd_lotes_aba, titulo) %}
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h4 class="text-dark fw-bold mb-0">
+                        {{ titulo }} 
+                        <span class="text-muted fs-6 fw-normal ms-2">(Documentos: <b>{{ lista|length }}</b> | Lotes: <b>{{ qtd_lotes_aba }}</b>)</span>
+                    </h4>
+                    <div class="d-flex gap-2">
+                        <button onclick="exportarSigep()" class="btn btn-warning shadow-sm fw-bold">
+                            <i class="bi bi-envelope"></i> Exportar SIGEP
+                        </button>
+                        <button onclick="exportarPlanilha()" class="btn btn-success shadow-sm fw-bold">
+                            <i class="bi bi-clipboard-data"></i> Copiar (Planilha)
+                        </button>
+                    </div>
+                </div>
+                <div class="card card-tabela shadow-sm table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <!-- CAIXA MESTRE (SELECIONAR TODOS) -->
+                                <th class="text-center" style="width: 70px;">
+                                    <input type="checkbox" class="form-check-input border-secondary" style="transform: scale(1.3); cursor: pointer;" title="Selecionar Todos desta aba" onclick="selecionarTodos(this)">
+                                </th>
+                                
+                                <th>Status</th>
+                                <th>Nº Doc</th>
+                                <th>Infração</th>
+                                <th>Nome</th>
+                                <th>CPF/CNPJ</th>
+                                <th>Data</th>
+                                <th class="text-end">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for reg in lista %}
+                            <tr>
+                                <td class="text-center">
+                                    <input type="checkbox" class="chk-exportar form-check-input" style="transform: scale(1.3); cursor: pointer;" value="{{ reg.id }}">
+                                </td>
+                                
+                                <!-- CÉLULA: BADGES DE STATUS -->
+                                <td>
+                                    {% set st = reg.status_documento or 'Aguardando AR' %}
+                                    {% if st == 'Conferido - Atendido' %}
+                                        <span class="badge bg-success">Atendido</span>
+                                    {% elif st == 'Conferido - Não Atendido' %}
+                                        <span class="badge bg-danger">Não Atendido</span>
+                                    {% elif st == 'Conferir' %}
+                                        <span class="badge bg-warning text-dark">Conferir</span>
+                                    {% elif 'DEVOLVIDO' in st %}
+                                        <span class="badge bg-warning-subtle text-dark border border-warning shadow-sm">{{ st }}</span>
+                                    {% elif 'CANCELADO' in st %}
+                                        <span class="badge bg-danger text-white shadow-sm">{{ st }}</span>
+                                    {% elif st.startswith('Auto') %}  
+                                        <span class="badge text-white shadow-sm" style="background-color: #6f42c1;">{{ st }}</span>
+                                    {% elif st == 'MULTADO' %}
+                                        <span class="badge bg-dark text-warning border border-warning shadow-sm">MULTADO</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">Aguard. AR</span>
+                                    {% endif %}
+                                </td>
+
+                                <td><span class="fw-bold text-primary">{{ reg.numero_documento }}</span></td>
+                                <td><span class="badge bg-secondary text-uppercase">{{ reg.inciso_amigavel }}</span></td>
+                                <td>{{ reg.nome }}</td>
+                                <td>{{ reg.cpf }}</td>
+                                <td>{{ reg.data }}</td>
+                                <td>
+                                    <div class="d-flex flex-nowrap gap-1 justify-content-end">
+                                        <button type="button" class="btn btn-sm btn-info text-white shadow-sm fw-bold"
+                                            data-bs-toggle="modal" 
+                                            data-bs-target="#modalVisualizar"
+                                            data-id="{{ reg.id }}"
+                                            data-status="{{ reg.status_documento or 'Aguardando AR' }}"
+                                            data-statuslimp="{{ reg.status_limpeza or '' }}"
+                                            data-statusfech="{{ reg.status_fechamento or '' }}"
+                                            data-statuspas="{{ reg.status_passeio or '' }}"
+                                            data-datalimp="{{ reg.data_conferencia_limpeza or '' }}"
+                                            data-datafech="{{ reg.data_conferencia_fechamento or '' }}"
+                                            data-datapas="{{ reg.data_conferencia_passeio or '' }}"
+                                            data-vistlimp="{{ reg.data_vistoria_limpeza or '' }}"
+                                            data-vistfech="{{ reg.data_vistoria_fechamento or '' }}"
+                                            data-vistpas="{{ reg.data_vistoria_passeio or '' }}"
+                                            data-obs="{{ reg.observacoes_status or '' }}"
+                                            data-mes-multa="{{ reg.mes_multa or '' }}" 
+                                            data-ano-multa="{{ reg.ano_multa or '' }}"
+                                            data-ardevolvido="{{ reg.ar_devolvido or '' }}"
+                                            data-motivo="{{ reg.motivo_devolucao or '' }}"
+                                            data-novonumero="{{ reg.novo_numero_refeito or '' }}"
+                                            data-cancelado="{{ reg.cancelado or '' }}"
+                                            data-motivocanc="{{ reg.motivo_cancelamento or '' }}"
+                                            data-novonumerocanc="{{ reg.novo_numero_cancelado or '' }}"
+                                            data-multalimp="{{ 'true' if reg.multa_limpeza else 'false' }}"
+                                            data-multafech="{{ 'true' if reg.multa_fechamento else 'false' }}"
+                                            data-multapas="{{ 'true' if reg.multa_passeio else 'false' }}"
+                                            data-numero="{{ reg.numero_documento }}"
+                                            data-tipo="{% if reg.tipo %}{{ reg.tipo }}{% else %}Não definido{% endif %}"
+                                            data-data="{{ reg.data }}"
+                                            data-inciso="{{ reg.inciso_amigavel }}"
+                                            data-nome="{{ reg.nome }}"
+                                            data-cpf="{{ reg.cpf }}"
+                                            data-tem-resp="{{ 'true' if reg.tem_responsavel else 'false' }}"
+                                            data-nome-resp="{{ reg.nome_responsavel }}"
+                                            data-cpf-resp="{{ reg.cpf_responsavel }}"
+                                            data-int-fiscal="{{ reg.numero_intimacao_fiscal }}"
+                                            data-int-data="{% if reg.dia_intimacao %}{{ reg.dia_intimacao }} de {{ reg.mes_intimacao }} de {{ reg.ano_intimacao }}{% endif %}"
+                                            data-end-prop="{{ reg.logradouro_proprietario }}"
+                                            data-num-prop="{{ reg.numero_proprietario }}"
+                                            data-comp-prop="{{ reg.complemento_proprietario }}"
+                                            data-bairro-prop="{{ reg.bairro_proprietario }}"
+                                            data-cid-prop="{{ reg.cidade_proprietario }}"
+                                            data-cep-prop="{{ reg.cep_proprietario }}"
+                                            data-imoveis="{{ reg.imoveis | forceescape }}"
+                                            onclick="preencherModal(this)">
+                                            {% if auth %}Status{% else %}Visualizar{% endif %}
+                                        </button>
+
+                                        <a href="/gerar/{{ reg.id }}" class="btn btn-sm btn-primary shadow-sm">Gerar</a>
+                                        {% if auth %}
+                                        <button hx-get="/editar/{{ reg.id }}" hx-target="#container-formulario" class="btn btn-sm btn-warning shadow-sm">Editar</button>
+                                        <button hx-delete="/deletar/{{ reg.id }}" hx-on::after-request="location.reload()" hx-confirm="Tem certeza que deseja excluir?" class="btn btn-sm btn-danger shadow-sm">X</button>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="8" class="text-center text-muted py-5">Nenhum registro encontrado.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% endmacro %}
+
+                <!-- ABA 2: Autos -->
+                <div class="tab-pane fade" id="conteudo-autos" role="tabpanel">
+                    {{ render_tabela(autos, total_lotes_autos, "Base de Dados: Autos de Infração") }}
+                </div>
+
+                <!-- ABA 3: Intimações -->
+                <div class="tab-pane fade" id="conteudo-intimacoes" role="tabpanel">
+                    {{ render_tabela(intimacoes, total_lotes_ints, "Base de Dados: Intimações") }}
+                </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        async function fazerLogin() {
+            let u = document.getElementById('login-user').value;
+            let p = document.getElementById('login-pass').value;
+            
+            let formData = new FormData();
+            formData.append('username', u);
+            formData.append('password', p);
+            
+            let response = await fetch('/login', { method: 'POST', body: formData });
+            if (response.ok) {
+                location.reload();
+            } else {
+                alert("Usuário ou senha incorretos.");
+            }
+        }
+
+        async function sairAuth() { 
+            await fetch('/logout', { method: 'POST' });
+            location.reload(); 
+        }
+        // Foca automaticamente no formulário após clicar em "Editar"
+        document.body.addEventListener('htmx:afterSwap', function(evt) {
+            if (evt.detail.target.id === 'container-formulario') {
+                var tab = new bootstrap.Tab(document.querySelector('#tab-formulario'));
+                tab.show();
+            }
+        });
+    </script>
+    
+    <!-- Modal de Visualização Completa -->
+    <div class="modal fade" id="modalVisualizar" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content border-0 shadow">
+          <div class="modal-header bg-primary text-white">
+            <h5 class="modal-title m-0 fw-bold">Detalhes do Documento</h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Fechar"></button>
+          </div>
+          <div class="modal-body p-4 bg-light">
+            
+            <!-- Bloco 1: Identificação -->
+            <h6 class="text-primary fw-bold border-bottom border-primary pb-2 mb-3">1. Identificação da Infração</h6>
+            <div class="row mb-4">
+              <div class="col-md-3"><p class="text-muted small mb-0">TIPO</p><p class="fw-bold" id="mv-tipo"></p></div>
+              <div class="col-md-3"><p class="text-muted small mb-0">NÚMERO</p><p class="fw-bold" id="mv-numero"></p></div>
+              <div class="col-md-3"><p class="text-muted small mb-0">DATA</p><p class="fw-bold" id="mv-data"></p></div>
+              <div class="col-md-3"><p class="text-muted small mb-0">INFRAÇÃO</p><p class="fw-bold text-danger text-uppercase" id="mv-inciso"></p></div>
+              <div class="col-12" id="div-mv-intimacao" style="display: none;">
+                <p class="text-muted small mb-0 mt-2">INTIMAÇÃO ORIGEM (NÃO ATENDIDA)</p>
+                <p class="fw-bold text-dark">Nº <span id="mv-int-num"></span> de <span id="mv-int-data"></span></p>
+              </div>
+            </div>
+
+            <!-- Bloco 2: Autuado -->
+            <h6 class="text-primary fw-bold border-bottom border-primary pb-2 mb-3">2. Dados do Autuado(a)</h6>
+            <div class="row mb-4">
+              <div class="col-md-8"><p class="text-muted small mb-0">NOME / RAZÃO SOCIAL</p><p class="fw-bold" id="mv-nome"></p></div>
+              <div class="col-md-4"><p class="text-muted small mb-0">CPF / CNPJ</p><p class="fw-bold" id="mv-cpf"></p></div>
+              <div class="col-12" id="div-mv-resp" style="display: none;">
+                <p class="text-muted small mb-0 mt-2">AOS CUIDADOS DE (RESPONSÁVEL)</p>
+                <p class="fw-bold text-dark"><span id="mv-nome-resp"></span> <span class="fw-normal">| CPF:</span> <span id="mv-cpf-resp"></span></p>
+              </div>
+            </div>
+
+            <!-- Bloco 3: Moradia -->
+            <h6 class="text-primary fw-bold border-bottom border-primary pb-2 mb-3">3. Moradia do Proprietário</h6>
+            <div class="row mb-4">
+              <div class="col-12"><p class="text-muted small mb-0">ENDEREÇO COMPLETO</p><p class="fw-bold" id="mv-end-prop"></p></div>
+            </div>
+
+            <!-- Bloco 4: Imóvel Fiscalizado -->
+            <h6 class="text-primary fw-bold border-bottom border-primary pb-2 mb-3">4. Imóvel Fiscalizado</h6>
+            <div class="row">
+              <div class="col-12"><p class="text-muted small mb-0">ENDEREÇO / REFERÊNCIA</p><p class="fw-bold" id="mv-end-imovel"></p></div>
+              <div class="col-12"><p class="text-muted small mb-0">BAIRRO</p><p class="fw-bold" id="mv-bairro-imovel"></p></div>
+              <div class="col-12 mt-3">
+                <p class="text-muted small mb-2">INSCRIÇÕES, LOTES E QUADRA</p>
+                <div id="mv-lotes-container" class="d-flex flex-wrap gap-2"></div>
+              </div>
+            </div>
+            
+            <!-- NOVO: SISTEMA DE ACOMPANHAMENTO E PRAZOS -->
+            <hr>
+            <h5 class="fw-bold mb-3"><i class="bi bi-clock-history"></i> Controle de Prazos</h5>
+            
+            {% if auth %}
+            <form hx-post="/salvar_status" hx-on::after-request="location.reload()">
+                <input type="hidden" name="id" id="vis_id">
+                
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label fw-bold text-muted">Status Geral (Cálculo Automático)</label>
+                        <input type="text" class="form-control bg-light fw-bold" id="vis_status" readonly>
+                    </div>
+                    
+                    <div class="col-12 mb-3 border p-3 bg-white rounded shadow-sm">
+                        <h6 class="fw-bold mb-2 text-primary">Aviso de Recebimento (AR)</h6>
+                        <div class="row">
+                            <div class="col-md-5">
+                                <select class="form-select form-select-sm border-primary" name="ar_devolvido" id="vis_ar_devolvido" onchange="toggleArDevolvido()">
+                                    <option value="">Entregue / Em andamento</option>
+                                    <option value="Não Refeito">Devolvido - Não Refeito</option>
+                                    <option value="Refeito">Devolvido - Refeito</option>
+                                    <option value="Cancelado - Não Refeito">Cancelado - Não Refeito</option>
+                                    <option value="Cancelado - Refeito">Cancelado - Refeito</option>
+                                </select>
+                            </div>
+                            <div class="col-md-7 d-none" id="div_motivo_devolucao">
+                                <input type="text" class="form-control form-control-sm" name="motivo_devolucao" id="vis_motivo_devolucao" placeholder="Motivo (Devolução ou Cancelamento)">
+                            </div>
+                            <div class="col-md-7 d-none" id="div_novo_numero_refeito">
+                                <input type="text" class="form-control form-control-sm" name="novo_numero_refeito" id="vis_novo_numero_refeito" placeholder="Nº do novo Auto ou Intimação">
+                            </div>
+                        </div>
+                    </div>
+                    
+                                    
+                    <!-- CONTAINER DE MULTA -->
+                    <div class="col-12 mb-3 d-none flex-column" id="container_multado">
+                        <label class="form-label fw-bold text-danger">Aplicação de Multa</label>
+                        
+                        <div class="d-flex align-items-center gap-3 mb-2">
+                            <div class="form-check form-switch mt-1">
+                                <input class="form-check-input border-danger" type="checkbox" role="switch" id="vis_is_multado" name="is_multado" value="true" onclick="verificarSeExibeMultado()" style="transform: scale(1.3); cursor: pointer;">
+                                <label class="form-check-label ms-2 fw-bold text-danger" for="vis_is_multado">Gerar Multa</label>
+                            </div>
+                            <div id="div_data_multa" class="d-none gap-2">
+                                <select class="form-select form-select-sm border-danger" name="mes_multa" id="vis_mes_multa">
+                                    <option value="">Mês</option>
+                                    <option value="Janeiro">Jan</option>
+                                    <option value="Fevereiro">Fev</option>
+                                    <option value="Março">Mar</option>
+                                    <option value="Abril">Abr</option>
+                                    <option value="Maio">Mai</option>
+                                    <option value="Junho">Jun</option>
+                                    <option value="Julho">Jul</option>
+                                    <option value="Agosto">Ago</option>
+                                    <option value="Setembro">Set</option>
+                                    <option value="Outubro">Out</option>
+                                    <option value="Novembro">Nov</option>
+                                    <option value="Dezembro">Dez</option>
+                                </select>
+                                <input type="text" class="form-control form-control-sm border-danger" name="ano_multa" id="vis_ano_multa" placeholder="Ano" maxlength="4" style="width: 70px;">
+                            </div>
+                        </div>
+
+                        <!-- ESCOLHA DOS INCISOS MULTADOS -->
+                        <div id="div_incisos_multa" class="d-none gap-3 mt-1 p-2 border border-danger rounded bg-white">
+                            <span class="small fw-bold text-danger pt-1">Infrações Multadas:</span>
+                            <div class="form-check mt-1">
+                                <input class="form-check-input border-danger" type="checkbox" id="vis_multa_limpeza" name="multa_limpeza" value="true">
+                                <label class="form-check-label small" for="vis_multa_limpeza">Limpeza</label>
+                            </div>
+                            <div class="form-check mt-1">
+                                <input class="form-check-input border-danger" type="checkbox" id="vis_multa_fechamento" name="multa_fechamento" value="true">
+                                <label class="form-check-label small" for="vis_multa_fechamento">Fechamento</label>
+                            </div>
+                            <div class="form-check mt-1">
+                                <input class="form-check-input border-danger" type="checkbox" id="vis_multa_passeio" name="multa_passeio" value="true">
+                                <label class="form-check-label small" for="vis_multa_passeio">Passeio</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row mb-4 border p-3 bg-light rounded mx-0 shadow-sm">
+                    <h6 class="fw-bold mb-3 text-secondary border-bottom pb-2">Controle de Prazos e Vistorias Independentes</h6>
+
+                    <!-- LIMPEZA -->
+                    <div class="col-md-4 border-end">
+                        <h6 class="fw-bold mb-1">Limpeza</h6>
+                        <label class="form-label small text-secondary mb-0">Prazo (Conferência)</label>
+                        <input type="date" class="form-control form-control-sm mb-3" name="data_conferencia_limpeza" id="vis_data_limpeza" onchange="sincronizarPrazos(this)">
+
+                        <div class="d-flex gap-2 mb-2">
+                            <input type="radio" class="btn-check" name="status_limpeza" id="vis_l_atendido" value="Atendido" onclick="toggleRadio(this)">
+                            <label class="btn btn-outline-success btn-sm fw-bold w-100" for="vis_l_atendido">Atendido</label>
+
+                            <input type="radio" class="btn-check" name="status_limpeza" id="vis_l_nao_atendido" value="Não Atendido" onclick="toggleRadio(this)">
+                            <label class="btn btn-outline-danger btn-sm fw-bold w-100" for="vis_l_nao_atendido">Não Atendido</label>
+                        </div>
+
+                        <div id="div_vis_vist_limpeza" class="d-none mt-2 p-2 bg-white border rounded border-primary">
+                            <label class="form-label small text-primary fw-bold mb-0">Data da Vistoria</label>
+                            <input type="date" class="form-control form-control-sm" name="data_vistoria_limpeza" id="vis_data_vistoria_limpeza">
+                        </div>
+                    </div>
+
+                    <!-- FECHAMENTO -->
+                    <div class="col-md-4 border-end">
+                        <h6 class="fw-bold mb-1">Fechamento</h6>
+                        <label class="form-label small text-secondary mb-0">Prazo (Conferência)</label>
+                        <input type="date" class="form-control form-control-sm mb-3" name="data_conferencia_fechamento" id="vis_data_fechamento" onchange="sincronizarPrazos(this)">
+                        
+                        <div class="d-flex gap-2 mb-2">
+                            <input type="radio" class="btn-check" name="status_fechamento" id="vis_f_atendido" value="Atendido" onclick="toggleRadio(this)">
+                            <label class="btn btn-outline-success btn-sm fw-bold w-100" for="vis_f_atendido">Atendido</label>
+
+                            <input type="radio" class="btn-check" name="status_fechamento" id="vis_f_nao_atendido" value="Não Atendido" onclick="toggleRadio(this)">
+                            <label class="btn btn-outline-danger btn-sm fw-bold w-100" for="vis_f_nao_atendido">Não Atendido</label>
+                        </div>
+
+                        <div id="div_vis_vist_fechamento" class="d-none mt-2 p-2 bg-white border rounded border-primary">
+                            <label class="form-label small text-primary fw-bold mb-0">Data da Vistoria</label>
+                            <input type="date" class="form-control form-control-sm" name="data_vistoria_fechamento" id="vis_data_vistoria_fechamento">
+                        </div>
+                    </div>
+
+                    <!-- PASSEIO -->
+                    <div class="col-md-4">
+                        <h6 class="fw-bold mb-1">Passeio</h6>
+                        <label class="form-label small text-secondary mb-0">Prazo (Conferência)</label>
+                        <input type="date" class="form-control form-control-sm mb-3" name="data_conferencia_passeio" id="vis_data_passeio" onchange="sincronizarPrazos(this)">
+                        
+                        <div class="d-flex gap-2 mb-2">
+                            <input type="radio" class="btn-check" name="status_passeio" id="vis_p_atendido" value="Atendido" onclick="toggleRadio(this)">
+                            <label class="btn btn-outline-success btn-sm fw-bold w-100" for="vis_p_atendido">Atendido</label>
+
+                            <input type="radio" class="btn-check" name="status_passeio" id="vis_p_nao_atendido" value="Não Atendido" onclick="toggleRadio(this)">
+                            <label class="btn btn-outline-danger btn-sm fw-bold w-100" for="vis_p_nao_atendido">Não Atendido</label>
+                        </div>
+
+                        <div id="div_vis_vist_passeio" class="d-none mt-2 p-2 bg-white border rounded border-primary">
+                            <label class="form-label small text-primary fw-bold mb-0">Data da Vistoria</label>
+                            <input type="date" class="form-control form-control-sm" name="data_vistoria_passeio" id="vis_data_vistoria_passeio">
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label fw-bold text-muted">Observações</label>
+                    <textarea name="observacoes_status" id="vis_obs" class="form-control" rows="2"></textarea>
+                </div>
+                <div class="text-end">
+                    <button type="submit" class="btn btn-success fw-bold">Salvar Prazos</button>
+                </div>
+            </form>
+
+            {% else %}
+            <!-- Visão Somente Leitura para Fiscal -->
+            <div class="alert alert-secondary mb-0">
+                <strong>Status Geral:</strong> <span class="text-dark fw-bold" id="lbl_vis_status"></span><br><br>
+                
+                <div id="lbl_ar_container" class="d-none mt-2 mb-2 alert alert-danger p-2 small">
+                    <strong id="lbl_ar_titulo"></strong> <span id="lbl_ar_texto"></span>
+                </div>
+                
+                <div id="lbl_canc_container" class="d-none mt-2 mb-2 alert alert-danger p-2 small">
+                    <strong id="lbl_canc_titulo"></strong> <span id="lbl_canc_texto"></span>
+                </div>
+                
+                <ul class="list-unstyled mb-2">
+                    <li><strong class="text-primary">Limpeza:</strong> <span id="lbl_l_status"></span> <small class="text-muted">(Prazo: <span id="lbl_l_prazo"></span> | Vistoriado em: <span id="lbl_l_vist"></span>)</small></li>
+                    <li><strong class="text-primary">Fechamento:</strong> <span id="lbl_f_status"></span> <small class="text-muted">(Prazo: <span id="lbl_f_prazo"></span> | Vistoriado em: <span id="lbl_f_vist"></span>)</small></li>
+                    <li><strong class="text-primary">Passeio:</strong> <span id="lbl_p_status"></span> <small class="text-muted">(Prazo: <span id="lbl_p_prazo"></span> | Vistoriado em: <span id="lbl_p_vist"></span>)</small></li>
+                </ul>
+                
+                <strong class="mt-2 d-block">Observações:</strong> <span id="lbl_vis_obs"></span>
+            </div>
+            {% endif %}
+            <!-- ============================================== -->
+            
+          </div>
+          <div class="modal-footer p-2">
+            <button type="button" class="btn btn-secondary btn-sm fw-bold" data-bs-dismiss="modal">Fechar Visualização</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+        <script>
+    
+    function sincronizarPrazos(campoOrigem) {
+        let tipo = document.getElementById('mv-tipo').innerText.trim();
+        let valor = campoOrigem.value;
+
+        // Se o campo foi limpo/apagado, não faz nada
+        if (!valor) return;
+
+        let cLimp = document.getElementById('vis_data_limpeza');
+        let cFech = document.getElementById('vis_data_fechamento');
+        let cPas = document.getElementById('vis_data_passeio');
+
+        if (tipo === 'Auto') {
+            // Regra dos Autos: Sincroniza qualquer campo que ainda esteja vazio
+            if (campoOrigem.id !== 'vis_data_limpeza' && cLimp.value === '') cLimp.value = valor;
+            if (campoOrigem.id !== 'vis_data_fechamento' && cFech.value === '') cFech.value = valor;
+            if (campoOrigem.id !== 'vis_data_passeio' && cPas.value === '') cPas.value = valor;
+        } else {
+            // Regra das Intimações: Sincroniza apenas Fechamento e Passeio entre si
+            if (campoOrigem.id === 'vis_data_fechamento' && cPas.value === '') cPas.value = valor;
+            if (campoOrigem.id === 'vis_data_passeio' && cFech.value === '') cFech.value = valor;
+        }
+    }
+    
+    function toggleArDevolvido() {
+        let val = document.getElementById('vis_ar_devolvido').value;
+        let divMotivo = document.getElementById('div_motivo_devolucao');
+        let divNovoNum = document.getElementById('div_novo_numero_refeito');
+        
+        divMotivo.classList.add('d-none');
+        divNovoNum.classList.add('d-none');
+        document.getElementById('vis_motivo_devolucao').removeAttribute('required');
+        document.getElementById('vis_novo_numero_refeito').removeAttribute('required');
+        
+        if (val === 'Não Refeito' || val === 'Cancelado - Não Refeito') {
+            divMotivo.classList.remove('d-none');
+            document.getElementById('vis_motivo_devolucao').setAttribute('required', 'required');
+        } else if (val === 'Refeito' || val === 'Cancelado - Refeito') {
+            divNovoNum.classList.remove('d-none');
+            document.getElementById('vis_novo_numero_refeito').setAttribute('required', 'required');
+        }
+    }
+    
+      
+    function verificarSeExibeMultado() {
+        let tipo = document.getElementById('mv-tipo').innerText;
+        let st = document.getElementById('vis_status').value;
+        let checkMultado = document.getElementById('vis_is_multado');
+        
+        let l_nao = document.getElementById('vis_l_nao_atendido') && document.getElementById('vis_l_nao_atendido').checked;
+        let f_nao = document.getElementById('vis_f_nao_atendido') && document.getElementById('vis_f_nao_atendido').checked;
+        let p_nao = document.getElementById('vis_p_nao_atendido') && document.getElementById('vis_p_nao_atendido').checked;
+        
+        let container = document.getElementById('container_multado');
+        let divDataMulta = document.getElementById('div_data_multa');
+        let divIncisosMulta = document.getElementById('div_incisos_multa');
+        let selMes = document.getElementById('vis_mes_multa');
+        let selAno = document.getElementById('vis_ano_multa');
+        
+        if (tipo === 'Auto' && (l_nao || f_nao || p_nao || st.includes('Não Atendido') || st === 'MULTADO')) {
+            container.classList.remove('d-none');
+            container.classList.add('d-flex');
+            
+            if (checkMultado && checkMultado.checked) {
+                divDataMulta.classList.remove('d-none');
+                divDataMulta.classList.add('d-flex');
+                divIncisosMulta.classList.remove('d-none');
+                divIncisosMulta.classList.add('d-flex');
+                selMes.setAttribute('required', 'required');
+                selAno.setAttribute('required', 'required');
+            } else {
+                divDataMulta.classList.remove('d-flex');
+                divDataMulta.classList.add('d-none');
+                divIncisosMulta.classList.remove('d-flex');
+                divIncisosMulta.classList.add('d-none');
+                selMes.removeAttribute('required');
+                selAno.removeAttribute('required');
+            }
+        } else {
+            container.classList.remove('d-flex');
+            container.classList.add('d-none');
+            divDataMulta.classList.remove('d-flex');
+            divDataMulta.classList.add('d-none');
+            if (divIncisosMulta) {
+                divIncisosMulta.classList.remove('d-flex');
+                divIncisosMulta.classList.add('d-none');
+            }
+            selMes.removeAttribute('required');
+            selAno.removeAttribute('required');
+            if(checkMultado) checkMultado.checked = false;
+        }
+    }
+    
+    function preencherModal(botao) {
+        // Funções auxiliares
+        const limpa = (val) => (!val || val.toLowerCase() === 'none') ? '' : val;
+        
+        // 1. Identificação
+        document.getElementById('mv-numero').innerText = botao.getAttribute('data-numero');
+        document.getElementById('mv-tipo').innerText = botao.getAttribute('data-tipo');
+        document.getElementById('mv-data').innerText = botao.getAttribute('data-data');
+        document.getElementById('mv-inciso').innerText = botao.getAttribute('data-inciso');
+        
+        // Intimação Origem
+        let intNum = limpa(botao.getAttribute('data-int-fiscal'));
+        let divInt = document.getElementById('div-mv-intimacao');
+        if (intNum) {
+            divInt.style.display = 'block';
+            document.getElementById('mv-int-num').innerText = intNum;
+            document.getElementById('mv-int-data').innerText = limpa(botao.getAttribute('data-int-data'));
+        } else {
+            divInt.style.display = 'none';
+        }
+    
+        // 2. Autuado
+        document.getElementById('mv-nome').innerText = botao.getAttribute('data-nome');
+        let cpf = limpa(botao.getAttribute('data-cpf'));
+        document.getElementById('mv-cpf').innerText = cpf ? cpf : "Não informado";
+        
+        // Responsável
+        let temResp = botao.getAttribute('data-tem-resp') === 'true';
+        let divResp = document.getElementById('div-mv-resp');
+        if (temResp) {
+            divResp.style.display = 'block';
+            document.getElementById('mv-nome-resp').innerText = limpa(botao.getAttribute('data-nome-resp'));
+            let cpfResp = limpa(botao.getAttribute('data-cpf-resp'));
+            document.getElementById('mv-cpf-resp').innerText = cpfResp ? cpfResp : "Não informado";
+        } else {
+            divResp.style.display = 'none';
+        }
+    
+        // 3. Moradia Proprietário
+        let rua = limpa(botao.getAttribute('data-end-prop'));
+        let num = limpa(botao.getAttribute('data-num-prop'));
+        let comp = limpa(botao.getAttribute('data-comp-prop'));
+        let bairro = limpa(botao.getAttribute('data-bairro-prop'));
+        let cid = limpa(botao.getAttribute('data-cid-prop'));
+        let cep = limpa(botao.getAttribute('data-cep-prop'));
+        
+        let enderecoCompleto = "";
+        if (rua) {
+            enderecoCompleto += rua;
+            if (num) enderecoCompleto += `, Nº ${num}`;
+            if (comp) enderecoCompleto += ` - ${comp}`;
+            if (bairro) enderecoCompleto += ` - ${bairro}`;
+            if (cid) enderecoCompleto += ` - ${cid}`;
+            if (cep) enderecoCompleto += ` - CEP: ${cep}`;
+        } else {
+            enderecoCompleto = "Não informado";
+        }
+        document.getElementById('mv-end-prop').innerText = enderecoCompleto;
+    
+        // 4. Imóvel Fiscalizado
+        try {
+            let imoveisRaw = botao.getAttribute('data-imoveis');
+            let imoveis = JSON.parse(imoveisRaw);
+            
+            document.getElementById('mv-end-imovel').innerText = imoveis.endereco_completo || 'Não informado';
+            document.getElementById('mv-bairro-imovel').innerText = imoveis.bairro || 'Não informado';
+            
+            let quadraImovel = imoveis.quadra || '--';
+            let containerLotes = document.getElementById('mv-lotes-container');
+            containerLotes.innerHTML = "";
+            
+            if (imoveis.lotes && imoveis.lotes.length > 0) {
+                imoveis.lotes.forEach(lote => {
+                    let badge = `<span class="badge py-2 px-3 border border-dark text-dark" style="background-color: #e9ecef !important; font-size: 15px;">
+                                   Inscrição: <b>${lote.inscricao || '--'}</b> | Lote: <b>${lote.numero || '--'}</b> | Quadra: <b>${quadraImovel}</b>
+                                 </span>`;
+                    containerLotes.insertAdjacentHTML('beforeend', badge);
+                });
+            } else {
+                containerLotes.innerHTML = '<span class="text-muted small">Nenhuma inscrição ou lote cadastrado.</span>';
+            }
+        } catch (e) {
+            console.error("Erro ao ler JSON de imóveis", e);
+            document.getElementById('mv-end-imovel').innerText = 'Erro na leitura dos dados do imóvel.';
+        }
+        
+        let st = botao.getAttribute('data-status');
+        let dLimpeza = botao.getAttribute('data-datalimp');
+        let dFechamento = botao.getAttribute('data-datafech');
+        let dPasseio = botao.getAttribute('data-datapas');
+        let dConf = botao.getAttribute('data-dataconf');
+        let obs = botao.getAttribute('data-obs');
+        
+        
+        // Verifica quais infrações o documento possui
+        let incisoStr = botao.getAttribute('data-inciso').toUpperCase();
+        let temLimpeza = incisoStr.includes('LIMPEZA');
+        let temFechamento = incisoStr.includes('FECHAMENTO');
+        let temPasseio = incisoStr.includes('PASSEIO');
+        
+        
+       {% if auth %}
+        document.getElementById('vis_id').value = botao.getAttribute('data-id');
+        document.getElementById('vis_status').value = st;
+        
+        let sLimp = botao.getAttribute('data-statuslimp');
+        let sFech = botao.getAttribute('data-statusfech');
+        let sPas = botao.getAttribute('data-statuspas');
+        
+        // Reset e preenchimento de estados dos Radios
+        const setRadio = (nome, valor, idAtendido, idNaoAtendido, divVistoria) => {
+            document.querySelectorAll(`input[name="${nome}"]`).forEach(r => { r.checked = false; r.setAttribute('data-waschecked', 'false'); });
+            if(valor === 'Atendido') { document.getElementById(idAtendido).checked = true; document.getElementById(idAtendido).setAttribute('data-waschecked', 'true'); }
+            if(valor === 'Não Atendido') { document.getElementById(idNaoAtendido).checked = true; document.getElementById(idNaoAtendido).setAttribute('data-waschecked', 'true'); }
+            document.getElementById(divVistoria).classList.toggle('d-none', !valor);
+        };
+        
+        setRadio('status_limpeza', sLimp, 'vis_l_atendido', 'vis_l_nao_atendido', 'div_vis_vist_limpeza');
+        setRadio('status_fechamento', sFech, 'vis_f_atendido', 'vis_f_nao_atendido', 'div_vis_vist_fechamento');
+        setRadio('status_passeio', sPas, 'vis_p_atendido', 'vis_p_nao_atendido', 'div_vis_vist_passeio');
+        
+        
+        if(st === 'MULTADO') { 
+            document.getElementById('vis_is_multado').checked = true; 
+        } else {
+            document.getElementById('vis_is_multado').checked = false;
+        }
+        
+        // FORÇA A SELEÇÃO DO MÊS CORRETO IGNORANDO MAIÚSCULAS/MINÚSCULAS
+       let mesSalvo = botao.getAttribute('data-mes-multa');
+        let selectMes = document.getElementById('vis_mes_multa');
+        
+        if (mesSalvo && mesSalvo.trim() !== '') {
+            mesSalvo = mesSalvo.trim().toLowerCase();
+            let encontrou = false;
+            
+            for (let i = 0; i < selectMes.options.length; i++) {
+                let val = selectMes.options[i].value.toLowerCase();
+                let txt = selectMes.options[i].text.toLowerCase();
+                
+                if (val === mesSalvo || txt === mesSalvo || mesSalvo.startsWith(txt) || val.startsWith(mesSalvo)) {
+                    selectMes.selectedIndex = i;
+                    encontrou = true;
+                    break;
+                }
+            }
+            if (!encontrou) selectMes.selectedIndex = 0;
+        } else {
+            selectMes.selectedIndex = 0;
+        }
+
+        document.getElementById('vis_ano_multa').value = botao.getAttribute('data-ano-multa') || '';
+        document.getElementById('vis_multa_limpeza').checked = botao.getAttribute('data-multalimp') === 'true';
+        document.getElementById('vis_multa_fechamento').checked = botao.getAttribute('data-multafech') === 'true';
+        document.getElementById('vis_multa_passeio').checked = botao.getAttribute('data-multapas') === 'true';
+        document.getElementById('vis_data_limpeza').value = botao.getAttribute('data-datalimp');
+        document.getElementById('vis_data_fechamento').value = botao.getAttribute('data-datafech');
+        document.getElementById('vis_data_passeio').value = botao.getAttribute('data-datapas');
+        document.getElementById('vis_data_vistoria_limpeza').value = botao.getAttribute('data-vistlimp');
+        document.getElementById('vis_data_vistoria_fechamento').value = botao.getAttribute('data-vistfech');
+        document.getElementById('vis_data_vistoria_passeio').value = botao.getAttribute('data-vistpas');
+        document.getElementById('vis_obs').value = obs;
+        
+        // Esconde colunas de prazos e checkboxes de multa não relacionados ao documento
+        document.getElementById('vis_data_limpeza').closest('.col-md-4').classList.toggle('d-none', !temLimpeza);
+        document.getElementById('vis_data_fechamento').closest('.col-md-4').classList.toggle('d-none', !temFechamento);
+        document.getElementById('vis_data_passeio').closest('.col-md-4').classList.toggle('d-none', !temPasseio);
+        
+        document.getElementById('vis_multa_limpeza').closest('.form-check').classList.toggle('d-none', !temLimpeza);
+        document.getElementById('vis_multa_fechamento').closest('.form-check').classList.toggle('d-none', !temFechamento);
+        document.getElementById('vis_multa_passeio').closest('.form-check').classList.toggle('d-none', !temPasseio);
+
+        document.getElementById('vis_ar_devolvido').value = botao.getAttribute('data-ardevolvido');
+        document.getElementById('vis_motivo_devolucao').value = botao.getAttribute('data-motivo');
+        document.getElementById('vis_novo_numero_refeito').value = botao.getAttribute('data-novonumero');
+        toggleArDevolvido();
+        
+                
+        verificarSeExibeMultado();
+        {% else %}
+           
+        const fmtSt = (val) => val ? val : 'Pendente';
+        document.getElementById('lbl_vis_status').textContent = st;
+        document.getElementById('lbl_l_status').textContent = fmtSt(botao.getAttribute('data-statuslimp'));
+        document.getElementById('lbl_f_status').textContent = fmtSt(botao.getAttribute('data-statusfech'));
+        document.getElementById('lbl_p_status').textContent = fmtSt(botao.getAttribute('data-statuspas'));
+        
+        document.getElementById('lbl_l_prazo').textContent = formatDataIso(botao.getAttribute('data-datalimp'));
+        document.getElementById('lbl_f_prazo').textContent = formatDataIso(botao.getAttribute('data-datafech'));
+        document.getElementById('lbl_p_prazo').textContent = formatDataIso(botao.getAttribute('data-datapas'));
+        
+        document.getElementById('lbl_l_vist').textContent = formatDataIso(botao.getAttribute('data-vistlimp'));
+        document.getElementById('lbl_f_vist').textContent = formatDataIso(botao.getAttribute('data-vistfech'));
+        document.getElementById('lbl_p_vist').textContent = formatDataIso(botao.getAttribute('data-vistpas'));
+        document.getElementById('lbl_vis_obs').textContent = obs || "Nenhuma.";
+        
+        // Esconde as informações irrelevantes na visualização do fiscal
+        document.getElementById('lbl_l_status').closest('li').classList.toggle('d-none', !temLimpeza);
+        document.getElementById('lbl_f_status').closest('li').classList.toggle('d-none', !temFechamento);
+        document.getElementById('lbl_p_status').closest('li').classList.toggle('d-none', !temPasseio);
+        
+        let arDev = botao.getAttribute('data-ardevolvido');
+        let arCont = document.getElementById('lbl_ar_container');
+        if (arDev === 'Não Refeito') {
+            arCont.classList.remove('d-none');
+            document.getElementById('lbl_ar_titulo').textContent = "AR Devolvido (Não Refeito):";
+            document.getElementById('lbl_ar_texto').textContent = botao.getAttribute('data-motivo');
+        } else if (arDev === 'Refeito') {
+            arCont.classList.remove('d-none');
+            document.getElementById('lbl_ar_titulo').textContent = "AR Devolvido (Refeito):";
+            document.getElementById('lbl_ar_texto').textContent = "Substituído pelo documento Nº " + botao.getAttribute('data-novonumero');
+        } else if (arDev === 'Cancelado - Não Refeito') {
+            arCont.classList.remove('d-none');
+            document.getElementById('lbl_ar_titulo').textContent = "CANCELADO (Não Refeito):";
+            document.getElementById('lbl_ar_texto').textContent = botao.getAttribute('data-motivo');
+        } else if (arDev === 'Cancelado - Refeito') {
+            arCont.classList.remove('d-none');
+            document.getElementById('lbl_ar_titulo').textContent = "CANCELADO E REFEITO:";
+            document.getElementById('lbl_ar_texto').textContent = "Substituído pelo documento Nº " + botao.getAttribute('data-novonumero');
+        } else {
+            arCont.classList.add('d-none');
+        }
+        
+        {% endif %}
+    }
+    
+    // Função que permite desmarcar botões Radio ao clicar novamente e expor a caixa de Data da Vistoria
+    function toggleRadio(radio) {
+        if (radio.getAttribute('data-waschecked') === 'true') {
+            radio.checked = false;
+            radio.setAttribute('data-waschecked', 'false');
+        } else {
+            document.querySelectorAll(`input[name="${radio.name}"]`).forEach(r => r.setAttribute('data-waschecked', 'false'));
+            radio.setAttribute('data-waschecked', 'true');
+        }
+        
+        let tipo = radio.name.replace('status_', '');
+        let isChecked = document.querySelector(`input[name="${radio.name}"]:checked`) !== null;
+        let divVistoria = document.getElementById('div_vis_vist_' + tipo);
+        
+        if (isChecked) {
+            divVistoria.classList.remove('d-none');
+        } else {
+            divVistoria.classList.add('d-none');
+            document.getElementById('vis_data_vistoria_' + tipo).value = ''; 
+        }
+        
+        verificarSeExibeMultado();
+    }
+
+    function formatDataIso(dataIso) {
+        if(!dataIso) return '-';
+        let p = dataIso.split('-'); 
+        return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : dataIso;
+    }
+    
+    async function exportarPlanilha() {
+    // Coleta todos os IDs dos checkboxes marcados na aba que estiver visível
+    let selecionados = Array.from(document.querySelectorAll('.chk-exportar:checked')).map(chk => parseInt(chk.value));
+    
+    if (selecionados.length === 0) {
+        alert("Selecione pelo menos um documento para exportar.");
+        return;
+    }
+    
+    try {
+        // Mostra que está carregando
+        document.body.style.cursor = 'wait';
+        
+        let response = await fetch('/exportar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(selecionados)
+        });
+        
+        if (!response.ok) {
+            throw new Error("Erro no servidor ao gerar dados.");
+        }
+        
+        let texto = await response.text();
+        
+        // Estrutura de fallback para garantir funcionamento na rede local via HTTP
+        if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(texto);
+        } else {
+            let textArea = document.createElement("textarea");
+            textArea.value = texto;
+            textArea.style.position = "fixed";
+            textArea.style.left = "-999999px";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            document.execCommand('copy');
+            textArea.remove();
+        }
+        
+        document.body.style.cursor = 'default';
+        alert("✅ Dados copiados com sucesso!\n\nAbra sua planilha do LibreOffice e aperte CTRL + V.");
+        
+        // (Opcional) Desmarca as caixinhas após copiar
+        document.querySelectorAll('.chk-exportar:checked').forEach(chk => chk.checked = false);
+        
+    } catch (err) {
+        document.body.style.cursor = 'default';
+        alert("Erro ao exportar: " + err);
+    }
+}
+
+    async function exportarSigep() {
+        let selecionados = Array.from(document.querySelectorAll('.chk-exportar:checked')).map(chk => parseInt(chk.value));
+        
+        if (selecionados.length === 0) {
+            alert("Selecione pelo menos um documento para exportar para o SIGEP.");
+            return;
+        }
+
+        try {
+            document.body.style.cursor = 'wait';
+            
+            // Busca a análise de agrupamentos no servidor
+            let response = await fetch('/exportar_sigep', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(selecionados)
+            });
+            
+            if (!response.ok) throw new Error("Erro no servidor ao gerar dados do SIGEP.");
+            
+            let grupos = await response.json();
+            document.body.style.cursor = 'default';
+            
+            let dadosFinais = [];
+            
+            // Toma a decisão de agrupar ou separar os destinatários
+            for (let g of grupos) {
+                let tipo_sg = g.tipo.toUpperCase();
+                let tipo_pl = tipo_sg === "AUTO" ? "AUTOS" : "INTIMAÇÕES";
+                
+                if (g.numeros.length > 1) {
+                    let numsStr = g.numeros.join(", ");
+                    let agrupar = confirm(`ALERTA DE REPETIÇÃO:\n\nO proprietário ${g.nome} possui ${g.numeros.length} documentos pendentes (${numsStr}) para o mesmo endereço.\n\nDeseja enviar estes documentos JUNTOS em um único AR?\n\n• [OK] = Agrupar em 1 pacote\n• [Cancelar] = Gerar pacotes separados`);
+                    
+                    if (agrupar) {
+                        let obs = "";
+                        if (g.numeros.length === 2) {
+                            obs = `${tipo_pl} Nº ${g.numeros[0]}/${g.ano} E Nº ${g.numeros[1]}/${g.ano} LOTES VAGOS`;
+                        } else {
+                            obs = `${tipo_pl} Nº ${g.numeros[0]}/${g.ano} À Nº ${g.numeros[g.numeros.length-1]}/${g.ano} LOTES VAGOS`;
+                        }
+                        dadosFinais.push({
+                            nome: g.nome, cep: g.cep, logradouro: g.logradouro,
+                            bairro: g.bairro, numero: g.numero, complemento: g.complemento,
+                            observacao: obs.substring(0, 100)
+                        });
+                    } else {
+                        for (let num of g.numeros) {
+                            dadosFinais.push({
+                                nome: g.nome, cep: g.cep, logradouro: g.logradouro,
+                                bairro: g.bairro, numero: g.numero, complemento: g.complemento,
+                                observacao: `${tipo_sg} Nº ${num}/${g.ano} LOTE VAGO`.substring(0, 100)
+                            });
+                        }
+                    }
+                } else {
+                    dadosFinais.push({
+                        nome: g.nome, cep: g.cep, logradouro: g.logradouro,
+                        bairro: g.bairro, numero: g.numero, complemento: g.complemento,
+                        observacao: `${tipo_sg} Nº ${g.numeros[0]}/${g.ano} LOTE VAGO`.substring(0, 100)
+                    });
+                }
+            }
+            
+            // Monta o script final unindo os dados com o robô
+            let jsonStr = JSON.stringify(dadosFinais, null, 2);
+            
+            let scriptAutomacao = `
+(async function() {
+// 1. DADOS INJETADOS PELO SISTEMA
+const dadosPlanilha = ${jsonStr};
+
+// 2. MOTOR DE AUTOMAÇÃO
+const esperar = (ms) => new Promise(res => setTimeout(res, ms));
+
+async function esperarElemento(seletor, maxTentativas = 200) {
+    let tentativas = 0;
+    let elemento = document.querySelector(seletor);
+    while (!elemento && tentativas < maxTentativas) {
+        await esperar(50);
+        elemento = document.querySelector(seletor);
+        tentativas++;
+    }
+    return elemento;
+}
+
+async function clicarQuandoExistir(seletor) {
+    let elemento = await esperarElemento(seletor);
+    if (elemento) {
+        elemento.click();
+    } else {
+        console.error("FALHA: O elemento " + seletor + " não foi encontrado.");
+    }
+}
+
+async function marcarCheckboxSeDesmarcado(seletor) {
+    let elemento = await esperarElemento(seletor);
+    if (elemento) {
+        if (!elemento.checked) {
+            elemento.click();
+        }
+    } else {
+        console.error("FALHA: O checkbox " + seletor + " não foi encontrado.");
+    }
+}
+
+function preencherCampo(seletor, valor) {
+    let campo = document.querySelector(seletor);
+    if (campo) {
+        let setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+        if (campo.tagName.toLowerCase() === 'textarea') {
+            setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+        } else if (campo.tagName.toLowerCase() === 'select') {
+            setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set;
+        }
+
+        if (setter) {
+            setter.call(campo, valor);
+        } else {
+            campo.value = valor;
+        }
+
+        campo.dispatchEvent(new Event('input', { bubbles: true }));
+        campo.dispatchEvent(new Event('change', { bubbles: true }));
+        campo.dispatchEvent(new Event('blur', { bubbles: true }));
+    } else {
+        console.warn("Aviso: Campo não encontrado: " + seletor);
+    }
+}
+
+function buscarMensagemDeErro() {
+    const seletoresErro = [
+        ".invalid-feedback", ".text-danger", ".alert-danger",
+        ".error-message", ".mensagem-erro", ".toast-error", "[role='alert']"
+    ];
+
+    for (let seletor of seletoresErro) {
+        let elementos = document.querySelectorAll(seletor);
+        for (let el of elementos) {
+            if (el.innerText.trim() !== "" && el.offsetParent !== null) {
+                return el.innerText.trim();
+            }
+        }
+    }
+    return null;
+}
+
+async function iniciarAutomacaoIntFiscal() {
+    let relatorioFalhas = [];
+
+    for (let i = 0; i < dadosPlanilha.length; i++) {
+        let linha = dadosPlanilha[i];
+        console.log(\`[\${i + 1}/\${dadosPlanilha.length}] Processando: \` + linha.nome);
+
+        if (i === 0) {
+            preencherCampo("#txtBuscaRemetente", "secretaria");
+            await clicarQuandoExistir("#btnBuscar");
+            await clicarQuandoExistir("#seleciona-2219722");
+            await clicarQuandoExistir("#embalagem-combo-ts-control");
+            await clicarQuandoExistir("#embalagem-combo-opt-3");
+        }
+
+        await clicarQuandoExistir("#novoDestinatario");
+        await esperar(300);
+
+        preencherCampo("#nomeDestinatario", linha.nome);
+        preencherCampo("#cepDestinatario", linha.cep);
+
+        if (linha.cep.endsWith("000")) {
+            await esperar(800);
+            preencherCampo("#logradouroDestinatario", linha.logradouro);
+            preencherCampo("#bairroDestinatario", linha.bairro);
+        } else {
+            let tentativasLogradouro = 0;
+            while (document.querySelector("#logradouroDestinatario").value === "" && tentativasLogradouro < 40) {
+                await esperar(50);
+                tentativasLogradouro++;
+            }
+        }
+
+        preencherCampo("#numeroDestinatario", linha.numero);
+        preencherCampo("#complementoDestinatario", linha.complemento);
+
+        await clicarQuandoExistir("#salvarDestinatario");
+        await esperar(500);
+
+        let erroDestinatario = buscarMensagemDeErro();
+        if (erroDestinatario) {
+            console.error(\`⛔ Erro ao salvar destinatário (\${linha.nome}). Pulando para o próximo.\`);
+            relatorioFalhas.push({ Nome: linha.nome, Etapa: "Destinatário", Erro: erroDestinatario });
+            continue;
+        }
+
+        let campoServico = await esperarElemento("#servico-combo");
+        if (campoServico) {
+            preencherCampo("#servico-combo", "80810");
+            await esperar(1000);
+        }
+
+        let dataFutura = new Date();
+        dataFutura.setDate(dataFutura.getDate() + 7);
+        let ano = dataFutura.getFullYear();
+        let mes = String(dataFutura.getMonth() + 1).padStart(2, '0');
+        let dia = String(dataFutura.getDate()).padStart(2, '0');
+        let dataStr = \`\${ano}-\${mes}-\${dia}\`;
+
+        preencherCampo("#data_prevista_postagem", dataStr);
+        preencherCampo("#observacaoObjeto", linha.observacao);
+
+        await marcarCheckboxSeDesmarcado("#cienteObjetoNaoProibido");
+        await clicarQuandoExistir("#gravarNova");
+        await esperar(1000);
+
+        let erroGravacao = buscarMensagemDeErro();
+        if (erroGravacao) {
+            console.error(\`⛔ Erro ao gravar a postagem (\${linha.nome}). Pulando para o próximo.\`);
+            relatorioFalhas.push({ Nome: linha.nome, Etapa: "Gravação Final", Erro: erroGravacao });
+            continue;
+        }
+    }
+
+    console.log("\\n-----------------------------------------");
+    if (relatorioFalhas.length > 0) {
+        console.warn(\`⚠️ Automação finalizada. \${relatorioFalhas.length} iterações apresentaram erro:\`);
+        console.table(relatorioFalhas);
+    } else {
+        console.log("✅ Automação finalizada com precisão! Nenhum erro encontrado.");
+    }
+    console.log("-----------------------------------------");
+}
+
+await iniciarAutomacaoIntFiscal();
+})();`;
+            
+            // Copia o script final para o mouse (clipboard)
+            if (navigator.clipboard && window.isSecureContext) {
+                await navigator.clipboard.writeText(scriptAutomacao);
+            } else {
+                let textArea = document.createElement("textarea");
+                textArea.value = scriptAutomacao;
+                textArea.style.position = "fixed";
+                textArea.style.left = "-999999px";
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                document.execCommand('copy');
+                textArea.remove();
+            }
+            
+            alert("✅ Robô gerado com sucesso!\n\n1. Vá para a aba do SIGEP (Correios).\n2. Dê um clique em qualquer lugar da tela.\n3. Clique no favorito '🤖 Rodar SIGEP' para iniciar.");
+            document.querySelectorAll('.chk-exportar:checked').forEach(chk => chk.checked = false);
+            
+        } catch (err) {
+            document.body.style.cursor = 'default';
+            alert("Erro ao exportar SIGEP: " + err);
+        }
+    }
+    
+    function mascaraCPFCNPJ(input) {
+    // Remove tudo o que não é número
+    let v = input.value.replace(/\D/g, "");
+
+    if (v.length <= 11) { 
+        // Máscara de CPF: 000.000.000-00
+        v = v.replace(/(\d{3})(\d)/, "$1.$2");
+        v = v.replace(/(\d{3})(\d)/, "$1.$2");
+        v = v.replace(/(\d{3})(\d{1,2})$/, "$1-$2");
+    } else { 
+        // Máscara de CNPJ: 00.000.000/0000-00
+        v = v.replace(/^(\d{2})(\d)/, "$1.$2");
+        v = v.replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3");
+        v = v.replace(/\.(\d{3})(\d)/, ".$1/$2");
+        v = v.replace(/(\d{4})(\d)/, "$1-$2");
+    }
+    input.value = v;
+}
+
+document.addEventListener("DOMContentLoaded", function() {
+    // 1. Restaura a aba que estava ativa antes do reload
+    let abaSalva = localStorage.getItem('abaAtual');
+    if (abaSalva) {
+        let tabBtn = document.querySelector('button[data-bs-target="' + abaSalva + '"]');
+        if (tabBtn) {
+            new bootstrap.Tab(tabBtn).show();
+        }
+    }
+
+    // 2. Monitora a mudança de abas e salva no navegador
+    let tabElements = document.querySelectorAll('button[data-bs-toggle="pill"]');
+    tabElements.forEach(btn => {
+        btn.addEventListener('shown.bs.tab', function(event) {
+            localStorage.setItem('abaAtual', event.target.getAttribute('data-bs-target'));
+        });
+    });
+});
+
+// Função para Selecionar Todos os itens da tabela atual
+function selecionarTodos(masterCheckbox) {
+    // Isola a tabela específica onde o usuário clicou (Autos ou Intimações)
+    let tabelaCorrente = masterCheckbox.closest('table');
+    
+    // Encontra todos os checkboxes de exportação apenas dessa tabela
+    let checkboxes = tabelaCorrente.querySelectorAll('.chk-exportar');
+    
+    // Iguala o status de todos ao status da caixa mestre (marcado/desmarcado)
+    checkboxes.forEach(chk => {
+        chk.checked = masterCheckbox.checked;
+    });
+}
+
+    </script>
+</body>
+</html>

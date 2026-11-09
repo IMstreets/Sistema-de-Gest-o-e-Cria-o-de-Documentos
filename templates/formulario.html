@@ -1,0 +1,448 @@
+<form hx-post="/salvar" hx-swap="none" hx-on::after-request="
+    if(event.detail.xhr.status === 200) {
+        if(event.detail.xhr.responseText === 'OK') { 
+            let tipoSelecionado = document.querySelector('select[name=\'tipo\']').value;
+            localStorage.setItem('abaAtual', tipoSelecionado === 'Auto' ? '#conteudo-autos' : '#conteudo-intimacoes');
+            window.location.reload(); 
+        } else if (event.detail.xhr.responseText === 'DUPLICADO') { 
+            alert('ERRO: Já existe um(a) ' + document.querySelector('select[name=\'tipo\']').value + ' com o número ' + document.querySelector('input[name=\'numero_documento\']').value + ' no sistema!'); 
+        }
+    } else {
+        alert('Falha ao salvar (Erro ' + event.detail.xhr.status + '). Verifique se preencheu todos os campos obrigatórios. Detalhes: ' + event.detail.xhr.responseText);
+    }
+">
+    {% if reg %}<input type="hidden" name="id" value="{{ reg.id }}">{% endif %}
+    
+    <div class="row mb-3">
+        <div class="col-md-2 col-4 mb-2">
+            <label class="form-label text-warning fw-bold mb-0"><small>Nº</small></label>
+            <input type="number" id="campo_numero_documento" name="numero_documento" class="form-control" value="{{ reg.numero_documento if reg else prox_auto }}" required {% if not auth %}disabled{% endif %}>
+        </div>
+        <div class="col-md-3 col-8 mb-2">
+            <label class="form-label text-white fw-bold mb-0"><small>Tipo de Documento</small></label>
+            <select name="tipo" class="form-select" onchange="toggleTipoDocumento()" {% if not auth %}disabled{% endif %}>
+                <option value="Auto" {% if reg and reg.tipo == 'Auto' %}selected{% endif %}>Auto</option>
+                <option value="Intimação" {% if reg and reg.tipo == 'Intimação' %}selected{% endif %}>Intimação</option>
+            </select>
+        </div>
+        <div class="col-md-4 col-12 mb-2">
+            <label class="form-label text-white fw-bold mb-0"><small>Opção/Infração</small></label>
+            <select name="inciso" class="form-select" {% if not auth %}disabled{% endif %}>
+                <option value="i" {% if reg and reg.inciso_select == 'i' %}selected{% endif %}>Limpeza</option>
+                <option value="iii" {% if reg and reg.inciso_select == 'iii' %}selected{% endif %}>Fechamento</option>
+                <option value="iv" {% if reg and reg.inciso_select == 'iv' %}selected{% endif %}>Passeio</option>
+                <option value="i iii" {% if reg and reg.inciso_select == 'i iii' %}selected{% endif %}>Limpeza e Fechamento</option>
+                <option value="i iv" {% if reg and reg.inciso_select == 'i iv' %}selected{% endif %}>Limpeza e Passeio</option>
+                <option value="iii iv" {% if reg and reg.inciso_select == 'iii iv' %}selected{% endif %}>Fechamento e Passeio</option>
+                <option value="i iii iv" {% if reg and reg.inciso_select == 'i iii iv' %}selected{% endif %}>Limpeza, Fechamento e Passeio</option>
+            </select>
+        </div>
+        
+        <!-- NOVO CAMPO: PROTOCOLO -->
+        <div class="col-md-3 col-12 mb-2" id="div-protocolo" style="display: {% if reg and reg.tipo == 'Intimação' %}block{% else %}none{% endif %};">
+            <label class="form-label text-info fw-bold mb-0"><small>Protocolo de Denúncia</small></label>
+            <input type="text" name="protocolo_denuncia" class="form-control" placeholder="Opcional" value="{{ reg.protocolo_denuncia if reg else '' }}" {% if not auth %}disabled{% endif %}>
+        </div>
+    </div>
+    
+    <div class="mb-3">
+        <label class="form-label text-white fw-bold mb-0"><small>Nome / Razão Social</small></label>
+        <input type="text" name="nome" class="form-control" value="{{ reg.nome if reg else '' }}" required {% if not auth %}disabled{% endif %}>
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label text-white fw-bold mb-0"><small>CPF / CNPJ</small></label>
+        <input type="text" name="cpf" id="cpf" class="form-control" oninput="mascaraCPFCNPJ(this)" maxlength="18" value="{{ reg.cpf if reg else '' }}">
+    </div>
+
+    <div class="form-check mb-2">
+        <input class="form-check-input" type="checkbox" name="tem_responsavel" id="checkResponsavel" value="true" onchange="toggleResponsavel()" {% if reg and reg.tem_responsavel %}checked{% endif %} {% if not auth %}disabled{% endif %}>
+        <label class="form-check-label text-white fw-bold" for="checkResponsavel"><small>Responsável / Aos cuidados (A/C)</small></label>
+    </div>
+    <div id="divResponsavel" class="mb-3 p-3 bg-white border border-secondary rounded shadow-sm" style="display: {% if reg and reg.tem_responsavel %}block{% else %}none{% endif %};">
+        
+        <!-- BOTÕES DE SELEÇÃO: A/C OU RESPONSÁVEL -->
+        <div class="d-flex gap-4 mb-3 pb-2 border-bottom">
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="tipo_responsavel" id="tipo_ac" value="A/C" {% if not reg or (reg and reg.tipo_responsavel != 'RESPONSÁVEL') %}checked{% endif %} {% if not auth %}disabled{% endif %}>
+                <label class="form-check-label fw-bold small text-dark" for="tipo_ac">Aos Cuidados (A/C)</label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="tipo_responsavel" id="tipo_resp" value="RESPONSÁVEL" {% if reg and reg.tipo_responsavel == 'RESPONSÁVEL' %}checked{% endif %} {% if not auth %}disabled{% endif %}>
+                <label class="form-check-label fw-bold small text-dark" for="tipo_resp">Responsável Direto</label>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-7">
+                <label class="form-label text-dark fw-bold mb-0"><small>Nome</small></label>
+                <input type="text" name="nome_responsavel" class="form-control bg-light" value="{{ reg.nome_responsavel if reg else '' }}" {% if not auth %}disabled{% endif %}>
+            </div>
+            <div class="col-5">
+                <label class="form-label text-dark fw-bold mb-0"><small>CPF</small></label>
+                <input type="text" name="cpf_responsavel" id="cpf_responsavel" class="form-control" oninput="mascaraCPFCNPJ(this)" maxlength="18" value="{{ reg.cpf_responsavel if reg else '' }}" {% if not auth %}disabled{% endif %}>
+            </div>
+        </div>
+    </div>
+
+    <div id="dados-auto-infracao" class="mb-3 p-3 bg-white border border-secondary rounded shadow-sm" style="display: {% if (reg and reg.tipo == 'Auto') or (not reg) %}block{% else %}none{% endif %};">
+        <h6 class="text-primary fw-bold border-bottom border-primary pb-2 mb-3">Dados da Intimação Origem</h6>
+        <div class="row">
+            <div class="col-4">
+                <label class="form-label text-dark fw-bold mb-0"><small>Nº da Intimação (com /ano)</small></label>
+                <input type="text" name="numero_intimacao_fiscal" class="form-control bg-light" value="{{ reg.numero_intimacao_fiscal if reg else '' }}" onkeydown="if(event.key === 'Enter' || event.keyCode === 13) { event.preventDefault(); buscarDadosIntimacao(); }" onblur="buscarDadosIntimacao()" {% if not auth %}disabled{% endif %}>
+            </div>
+            <div class="col-2">
+                <label class="form-label text-dark fw-bold mb-0"><small>Dia</small></label>
+                <input type="text" name="dia_intimacao" class="form-control bg-light" value="{{ reg.dia_intimacao if reg else '' }}" placeholder="Ex: 01" {% if not auth %}disabled{% endif %}>
+            </div>
+            <div class="col-4">
+                <label class="form-label text-dark fw-bold mb-0"><small>Mês</small></label>
+                <input type="text" name="mes_intimacao" class="form-control bg-light" value="{{ reg.mes_intimacao if reg else '' }}" placeholder="Ex: Janeiro" {% if not auth %}disabled{% endif %}>
+            </div>
+            <div class="col-2">
+                <label class="form-label text-dark fw-bold mb-0"><small>Ano</small></label>
+                <input type="text" name="ano_intimacao" class="form-control bg-light" value="{{ reg.ano_intimacao if reg else '' }}" placeholder="Ex: 2026" {% if not auth %}disabled{% endif %}>
+            </div>
+        </div>
+    </div>
+
+    <h6 class="text-white mt-4 mb-3 fw-bold border-bottom border-light pb-2">Dados de Moradia do Proprietário</h6>
+    
+    <!-- Primeira Linha: CEP -->
+    <div class="row mb-2">
+        <div class="col-4">
+            <label class="form-label text-white fw-bold mb-0"><small>CEP</small></label>
+            <input type="text" name="cep_proprietario" class="form-control" value="{{ reg.cep_proprietario if reg else '' }}" oninput="this.value = mascaraCEP(this.value)" onblur="buscarCEP(this.value)" maxlength="9" {% if not auth %}disabled{% endif %}>
+        </div>
+    </div>
+
+    <!-- Segunda Linha: Logradouro, Nº e Complemento -->
+    <div class="row mb-2">
+        <div class="col-7">
+            <label class="form-label text-white fw-bold mb-0"><small>Logradouro</small></label>
+            <input type="text" name="logradouro_proprietario" class="form-control" value="{{ reg.logradouro_proprietario if reg else '' }}" {% if not auth %}disabled{% endif %}>
+        </div>
+        <div class="col-2">
+            <label class="form-label text-white fw-bold mb-0"><small>Nº</small></label>
+            <input type="text" name="numero_proprietario" class="form-control" value="{{ reg.numero_proprietario if reg else '' }}" oninput="validarNumeroOuSN(this)" {% if not auth %}disabled{% endif %}>
+        </div>
+        <div class="col-3">
+            <label class="form-label text-white fw-bold mb-0"><small>Complemento</small></label>
+            <input type="text" name="complemento_proprietario" class="form-control" value="{{ reg.complemento_proprietario if reg else '' }}" {% if not auth %}disabled{% endif %}>
+        </div>
+    </div>
+    
+    <!-- Terceira Linha: Bairro e Cidade -->
+    <div class="row mb-3">
+        <div class="col-6">
+            <label class="form-label text-white fw-bold mb-0"><small>Bairro</small></label>
+            <input type="text" name="bairro_proprietario" class="form-control" value="{{ reg.bairro_proprietario if reg else '' }}" {% if not auth %}disabled{% endif %}>
+        </div>
+        <div class="col-6">
+            <label class="form-label text-white fw-bold mb-0"><small>Cidade - UF</small></label>
+            <input type="text" name="cidade_proprietario" class="form-control" value="{{ reg.cidade_proprietario if reg else 'Montes Claros - MG' }}" {% if not auth %}disabled{% endif %}>
+        </div>
+    </div>
+
+    <div class="mb-4">
+        <label class="form-label text-white fw-bold mb-0"><small>Data de Criação do Documento</small></label>
+        <!-- Campo oculto que guarda o formato DD/MM/AAAA para o banco de dados -->
+        <input type="hidden" name="data" id="data_hidden" value="{{ reg.data if reg else '' }}">
+        <!-- Campo visual de calendário -->
+        <input type="date" id="campo_data" class="form-control" onchange="formatarParaServidor(this.value)" {% if not auth %}disabled{% endif %}>
+    </div>
+
+    <h6 class="text-white mt-4 mb-3 fw-bold border-bottom border-light pb-2">Dados do Imóvel Fiscalizado</h6>
+    <div class="mb-3">
+        <label class="form-label text-white fw-bold mb-0"><small>Logradouro / Referência</small></label>
+        <textarea name="endereco_completo" class="form-control" rows="2" required {% if not auth %}disabled{% endif %}>{{ dados_imoveis.endereco_completo if dados_imoveis else '' }}</textarea>
+    </div>
+
+    <div class="row mb-3">
+        <div class="col-6">
+            <label class="form-label text-white fw-bold mb-0"><small>Bairro</small></label>
+            <input type="text" name="bairro" class="form-control" value="{{ dados_imoveis.bairro if dados_imoveis else '' }}" required {% if not auth %}disabled{% endif %}>
+        </div>
+        <div class="col-6">
+            <label class="form-label text-white fw-bold mb-0"><small>Quadra</small></label>
+            <input type="text" name="quadra" class="form-control" value="{{ dados_imoveis.quadra if dados_imoveis else '' }}" required {% if not auth %}disabled{% endif %}>
+        </div>
+    </div>
+
+    <h6 class="text-white mb-2"><small class="fw-bold">Inscrições e Lotes</small></h6>
+    
+    <div id="container-lotes">
+        {% if dados_imoveis and dados_imoveis.lotes %}
+            {% for lote in dados_imoveis.lotes %}
+            <div class="bloco-lote d-flex gap-2 mb-2 align-items-center">
+                <input type="text" name="inscricoes" class="form-control w-50" placeholder="Inscrição" value="{{ lote.inscricao }}" oninput="this.value = mascaraInscricao(this.value)" maxlength="18" required {% if not auth %}disabled{% endif %}>
+                <input type="text" name="numeros_lotes" class="form-control w-50" placeholder="Nº do Lote" value="{{ lote.numero }}" required {% if not auth %}disabled{% endif %}>
+                {% if auth %}
+                <button type="button" class="btn btn-danger btn-sm fw-bold px-3 shadow-sm" onclick="removerLote(this)" title="Remover lote">X</button>
+                {% endif %}
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="bloco-lote d-flex gap-2 mb-2 align-items-center">
+                <input type="text" name="inscricoes" class="form-control w-50" placeholder="Inscrição" oninput="this.value = mascaraInscricao(this.value)" maxlength="18" required {% if not auth %}disabled{% endif %}>
+                <input type="text" name="numeros_lotes" class="form-control w-50" placeholder="Nº do Lote" required {% if not auth %}disabled{% endif %}>
+                {% if auth %}
+                <button type="button" class="btn btn-danger btn-sm fw-bold px-3 shadow-sm" onclick="removerLote(this)" title="Remover lote">X</button>
+                {% endif %}
+            </div>
+        {% endif %}
+    </div>
+    
+    <button type="button" class="btn btn-outline-light btn-sm mb-4 w-100 fw-bold" onclick="adicionarLote()" {% if not auth %}disabled{% endif %}>+ Adicionar Inscrição/Lote</button>
+    
+    {% if auth %}
+        <button type="submit" class="btn btn-success w-100 mb-2 fw-bold shadow-sm">{% if reg %}Salvar Alterações{% else %}Criar Documento{% endif %}</button>
+        {% if reg %}
+            <button type="button" class="btn btn-danger w-100 fw-bold shadow-sm" hx-get="/editar/0" hx-target="#container-formulario" hx-swap="outerHTML" onclick="let tipo = document.querySelector('select[name=\'tipo\']').value; document.querySelector(tipo === 'Auto' ? '#tab-autos' : '#tab-intimacoes').click();">Cancelar Edição</button>
+        {% endif %}
+    {% endif %}
+
+</form>
+
+<script>
+var proxAuto = {{ prox_auto | default(1) }};
+var proxInt = {{ prox_int | default(1) }};
+var isEdicao = {{ 'true' if reg else 'false' }};
+
+function mascaraCpfCnpj(v) {
+    v = v.replace(/\D/g, "");
+    if (v.length <= 11) {
+        v = v.replace(/(\d{3})(\d)/, "$1.$2");
+        v = v.replace(/(\d{3})(\d)/, "$1.$2");
+        v = v.replace(/(\d{3})(\d{1,2})$/, "$1-$2");
+    } else {
+        v = v.replace(/^(\d{2})(\d)/, "$1.$2");
+        v = v.replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3");
+        v = v.replace(/\.(\d{3})(\d)/, ".$1/$2");
+        v = v.replace(/(\d{4})(\d{1,2})$/, "$1-$2");
+    }
+    return v.substring(0, 18);
+}
+
+function mascaraInscricao(v) {
+    v = v.replace(/\D/g, ""); 
+    v = v.replace(/^(\d{2})(\d)/, "$1.$2");
+    v = v.replace(/^(\d{2})\.(\d{2})(\d)/, "$1.$2.$3");
+    v = v.replace(/^(\d{2})\.(\d{2})\.(\d{3})(\d)/, "$1.$2.$3.$4");
+    v = v.replace(/^(\d{2})\.(\d{2})\.(\d{3})\.(\d{4})(\d)/, "$1.$2.$3.$4.$5");
+    return v.substring(0, 18);
+}
+
+function mascaraData(v) {
+    v = v.replace(/\D/g, "");
+    v = v.replace(/^(\d{2})(\d)/, "$1/$2");
+    v = v.replace(/^(\d{2})\/(\d{2})(\d)/, "$1/$2/$3");
+    return v.substring(0, 10);
+}
+
+function mascaraCEP(v) {
+    v = v.replace(/\D/g, "");
+    v = v.replace(/^(\d{5})(\d)/, "$1-$2");
+    return v.substring(0, 9);
+}
+
+async function buscarCEP(cep) {
+    // Remove o traço para enviar apenas os números para a API
+    var cepLimpo = cep.replace(/\D/g, '');
+    
+    // Verifica se tem exatamente 8 números
+    if (cepLimpo.length === 8) {
+        try {
+            let response = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`);
+            let dados = await response.json();
+            
+            if (!dados.erro) {
+                // Preenche os campos automaticamente e força letra maiúscula (padrão do seu sistema)
+                document.querySelector('input[name="logradouro_proprietario"]').value = dados.logradouro.toUpperCase();
+                document.querySelector('input[name="bairro_proprietario"]').value = dados.bairro.toUpperCase();
+                document.querySelector('input[name="cidade_proprietario"]').value = dados.localidade.toUpperCase() + ' - ' + dados.uf.toUpperCase();
+            } else {
+                alert("CEP não encontrado.");
+            }
+        } catch (error) {
+            console.error("Erro ao buscar o CEP: ", error);
+        }
+    }
+}
+
+function adicionarLote() {
+    var container = document.getElementById('container-lotes');
+    var blocos = container.getElementsByClassName('bloco-lote');
+    
+    if (blocos.length > 0) {
+        var novoBloco = blocos[0].cloneNode(true);
+        novoBloco.querySelectorAll('input').forEach(function(input) { input.value = ''; });
+        container.appendChild(novoBloco);
+    } else {
+        container.insertAdjacentHTML('beforeend', `
+            <div class="bloco-lote d-flex gap-2 mb-2">
+                <input type="text" name="inscricoes" class="form-control w-50" placeholder="Inscrição" oninput="this.value = mascaraInscricao(this.value)" maxlength="18" required>
+                <input type="text" name="numeros_lotes" class="form-control w-50" placeholder="Nº do Lote" required>
+            </div>
+        `);
+    }
+}
+
+function removerLote(botao) {
+    var container = document.getElementById('container-lotes');
+    var blocos = container.getElementsByClassName('bloco-lote');
+    
+    // Impede a exclusão se for o único lote restante na tela
+    if (blocos.length > 1) {
+        botao.closest('.bloco-lote').remove();
+    } else {
+        alert("O documento precisa ter pelo menos um Lote/Inscrição vinculado.");
+    }
+}
+
+function toggleResponsavel() {
+    var checkBox = document.getElementById("checkResponsavel");
+    var divResp = document.getElementById("divResponsavel");
+    if(divResp) divResp.style.display = checkBox.checked ? "block" : "none";
+}
+
+function toggleTipoDocumento() {
+    var selectElement = document.querySelector('select[name="tipo"]');
+    var divAuto = document.getElementById("dados-auto-infracao");
+    var campoNumero = document.getElementById("campo_numero_documento");
+    var divProtocolo = document.getElementById("div-protocolo");
+    
+    if (selectElement) {
+        var tipo = selectElement.value;
+        if (divAuto) divAuto.style.display = tipo === 'Auto' ? 'block' : 'none';
+        if (divProtocolo) divProtocolo.style.display = tipo === 'Intimação' ? 'block' : 'none';
+        if (!isEdicao && campoNumero) campoNumero.value = tipo === 'Auto' ? proxAuto : proxInt;
+    }
+}
+
+async function buscarDadosIntimacao() {
+    var inputNumero = document.querySelector('input[name="numero_intimacao_fiscal"]');
+    if (!inputNumero || !inputNumero.value) return;
+
+    var numeroStr = inputNumero.value.split('/')[0].trim();
+    var numero = parseInt(numeroStr, 10);
+    if (isNaN(numero)) return;
+
+    try {
+        var response = await fetch('/api/intimacao/' + numero);
+        if (!response.ok) throw new Error("Falha na API.");
+        var data = await response.json();
+
+        if (data.encontrado) {
+            var limpa = (val) => (!val || String(val).toLowerCase() === 'none') ? '' : val;
+            var setVal = (seletor, valor) => {
+                var el = document.querySelector(seletor);
+                if (el) el.value = valor;
+            };
+
+            setVal('select[name="inciso"]', data.inciso);
+            setVal('input[name="nome"]', limpa(data.nome));
+            setVal('input[name="cpf"]', limpa(data.cpf));
+            setVal('input[name="dia_intimacao"]', limpa(data.dia_intimacao));
+            setVal('input[name="mes_intimacao"]', limpa(data.mes_intimacao));
+            setVal('input[name="ano_intimacao"]', limpa(data.ano_intimacao));
+            
+            setVal('input[name="logradouro_proprietario"]', limpa(data.logradouro_proprietario));
+            setVal('input[name="numero_proprietario"]', limpa(data.numero_proprietario));
+            setVal('input[name="complemento_proprietario"]', limpa(data.complemento_proprietario));
+            setVal('input[name="bairro_proprietario"]', limpa(data.bairro_proprietario));
+            setVal('input[name="cidade_proprietario"]', limpa(data.cidade_proprietario) || 'Montes Claros - MG');
+            setVal('input[name="cep_proprietario"]', limpa(data.cep_proprietario));
+
+            var checkResp = document.getElementById('checkResponsavel');
+            if (checkResp) {
+                if (data.tem_responsavel && !checkResp.checked) {
+                    checkResp.checked = true;
+                    toggleResponsavel();
+                } else if (!data.tem_responsavel && checkResp.checked) {
+                    checkResp.checked = false;
+                    toggleResponsavel();
+                }
+            }
+            setVal('input[name="nome_responsavel"]', limpa(data.nome_responsavel));
+            setVal('input[name="cpf_responsavel"]', limpa(data.cpf_responsavel));
+            
+            if (data.tem_responsavel) {
+                if (data.tipo_responsavel === 'RESPONSÁVEL') {
+                    document.getElementById('tipo_resp').checked = true;
+                } else {
+                    document.getElementById('tipo_ac').checked = true;
+                }
+            }
+            
+
+            if (data.dados_imoveis) {
+                setVal('textarea[name="endereco_completo"]', limpa(data.dados_imoveis.endereco_completo));
+                setVal('input[name="bairro"]', limpa(data.dados_imoveis.bairro));
+                setVal('input[name="quadra"]', limpa(data.dados_imoveis.quadra));
+
+                var container = document.getElementById('container-lotes');
+                if (container) {
+                    container.innerHTML = ''; 
+                    if (data.dados_imoveis.lotes && data.dados_imoveis.lotes.length > 0) {
+                        data.dados_imoveis.lotes.forEach(function(lote) {
+                            container.insertAdjacentHTML('beforeend', `
+                                <div class="bloco-lote d-flex gap-2 mb-2 align-items-center">
+                                    <input type="text" name="inscricoes" class="form-control w-50" placeholder="Inscrição" value="${limpa(lote.inscricao)}" oninput="this.value = mascaraInscricao(this.value)" maxlength="18" required>
+                                    <input type="text" name="numeros_lotes" class="form-control w-50" placeholder="Nº do Lote" value="${limpa(lote.numero)}" required>
+                                    <button type="button" class="btn btn-danger btn-sm fw-bold px-3 shadow-sm" onclick="removerLote(this)">X</button>
+                                </div>
+                            `);
+                        });
+                    } else {
+                        container.insertAdjacentHTML('beforeend', `
+                            <div class="bloco-lote d-flex gap-2 mb-2 align-items-center">
+                                <input type="text" name="inscricoes" class="form-control w-50" placeholder="Inscrição" oninput="this.value = mascaraInscricao(this.value)" maxlength="18" required>
+                                <input type="text" name="numeros_lotes" class="form-control w-50" placeholder="Nº do Lote" required>
+                                <button type="button" class="btn btn-danger btn-sm fw-bold px-3 shadow-sm" onclick="removerLote(this)">X</button>
+                            </div>
+                        `);
+                    }
+                }
+            }
+        } else {
+            alert("Atenção: Intimação de origem não encontrada no banco de dados.");
+        }
+    } catch (error) {
+        console.error("Erro na busca:", error);
+    }
+}
+
+function formatarParaServidor(valorDate) {
+    var campoOculto = document.getElementById('data_hidden');
+    if (valorDate && campoOculto) {
+        var p = valorDate.split('-'); 
+        campoOculto.value = p[2] + '/' + p[1] + '/' + p[0]; 
+    } else if (campoOculto) {
+        campoOculto.value = '';
+    }
+}
+
+(function() {
+    var cv = document.getElementById('campo_data');
+    var co = document.getElementById('data_hidden');
+    if (!cv || !co) return;
+
+    var valorBanco = co.value.trim();
+    
+    if (valorBanco && valorBanco !== 'None' && valorBanco !== '') {
+        var p = valorBanco.split('/');
+        if (p.length === 3) {
+            cv.value = p[2] + '-' + p[1] + '-' + p[0];
+        }
+    } else if (!isEdicao) {
+        var h = new Date();
+        var ano = h.getFullYear();
+        var mes = String(h.getMonth() + 1).padStart(2, '0');
+        var dia = String(h.getDate()).padStart(2, '0');
+        cv.value = ano + '-' + mes + '-' + dia;
+        co.value = dia + '/' + mes + '/' + ano;
+    }
+})();
+</script>
